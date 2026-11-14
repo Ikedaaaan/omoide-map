@@ -1123,7 +1123,7 @@ function ensureFootLayers(){
     map.addLayer({ id:"fog", type:"fill", source:"fog", layout:{ visibility:"none" }, paint:{ "fill-color":"#fff8ef", "fill-opacity":0.62 } });
     map.addLayer({ id:"foot", type:"circle", source:"foot", layout:{ visibility:"none" }, paint:{
       "circle-color":["get","c"], "circle-opacity":0.3, "circle-blur":0.55,
-      "circle-radius":["interpolate",["exponential",2],["zoom"], 8,0.4, 20,1700] } });   // 半径およそ100m
+      "circle-radius":["interpolate",["exponential",2],["zoom"], 8,0.2, 20,850] } });   // 半径およそ50m
   }
   return true;
 }
