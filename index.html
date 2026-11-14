@@ -1308,10 +1308,15 @@ async function showLetterBody(id, head, openersHTML){
 }
 
 // ---------- 👥 合流ショット(友達と近くにいるときに一緒に1枚) ----------
-const MEET_M = 100, MEET_FRESH = 10*60*1000, MEET_PER_DAY = 2, MEET_GAP = 3600*1000;
+const MEET_M = 100, MEET_FRESH = 10*60*1000;
 let meets = {}, meetMarkers = [], meetNearby = [], meetShowing = [];
+// 今日その人と一緒に合流ショットを撮ったか(同じ人とは1日1回まで)
+function shotToday(u){
+  const today = jstDate();
+  return Object.values(meets).some(M=>{ if(jstDate(M.at||0)!==today) return false; const p = [M.uid, ...(M.with||[])]; return p.includes(me.uid) && p.includes(u); });
+}
 function meetSeen(){ try{ return JSON.parse(LS.get("omoide.meetseen")||"{}"); }catch(_){ return {}; } }
-// 位置共有中の友達が100m以内・10分以内に更新していたら声をかける(同じ人とは1日2回まで・前回から1時間あける)
+// 位置共有中の友達が100m以内・10分以内に更新していたら声をかける(同じ人とは1日1回まで。今日もう一緒に撮った人には出さない)
 function checkMeet(){
   const bar = $("#meetBar"); if(!bar) return;
   if(!me || !gid || !myPos){ bar.classList.remove("show"); meetShowing = []; return; }
@@ -1324,7 +1329,7 @@ function checkMeet(){
     return;
   }
   const today = jstDate(), seen = meetSeen();
-  const ok = u=>{ const r = seen[u]; return !r || typeof r!=="object" || r.d!==today || (r.n < MEET_PER_DAY && now - r.t >= MEET_GAP); };
+  const ok = u=>{ const r = seen[u]; return !shotToday(u) && (!r || typeof r!=="object" || r.d!==today); };
   const fresh = meetNearby.filter(ok);
   if(!fresh.length){ bar.classList.remove("show"); return; }
   fresh.forEach(u=>{ const r = seen[u]; seen[u] = (r && typeof r==="object" && r.d===today) ? { d:today, n:r.n+1, t:now } : { d:today, n:1, t:now }; });
@@ -1339,13 +1344,16 @@ setInterval(checkMeet, 30000);
 
 function openMeetCapture(pre){
   if(!gid){ toast("グループに入ってから使えます"); return; }
-  const sel = new Set((pre||[]).filter(u=>members[u]));
+  const sel = new Set((pre||[]).filter(u=>members[u] && !shotToday(u)));
   const st = { photo:null, thumb:null };
   const others = Object.keys(members).filter(u=>u!==me.uid);
   openSheet(`<h2>👥 合流ショット</h2>
     <p class="hint">一緒にいる友達を選んで、1枚撮ろう。写真は<b>今いる場所</b>に「◯人で来た」記録として残ります。</p>
     <label class="f">一緒にいる人</label>
-    <div class="genres" id="mWith">${others.length ? others.map(u=>`<button type="button" data-u="${esc(u)}" class="${sel.has(u)?"on":""}">${avatarHTML(members[u],20)} ${esc(who(u))}</button>`).join("") : `<span class="hint">グループに友達がいません</span>`}</div>
+    <div class="genres" id="mWith">${others.length ? others.map(u=>shotToday(u)
+      ? `<button type="button" disabled style="opacity:.45">${avatarHTML(members[u],20)} ${esc(who(u))}(今日は撮影済み)</button>`
+      : `<button type="button" data-u="${esc(u)}" class="${sel.has(u)?"on":""}">${avatarHTML(members[u],20)} ${esc(who(u))}</button>`).join("") : `<span class="hint">グループに友達がいません</span>`}</div>
+    <p class="hint">同じ人との合流ショットは1日1回までです。</p>
     <label class="f">写真 *</label>
     <input type="file" id="mPhoto" accept="image/*">
     <img class="pv" id="mPv" alt="">
@@ -1358,6 +1366,7 @@ function openMeetCapture(pre){
   });
   $("#mOk").onclick = async ()=>{
     if(!sel.size){ toast("一緒にいる人を選んでね"); return; }
+    const done = [...sel].filter(shotToday); if(done.length){ toast(`${done.map(who).join("、")}さんとは今日もう撮りました(1日1回まで)`); return; }
     if(!st.photo){ toast("写真を撮ってね"); return; }
     const btn = $("#mOk"); btn.disabled = true; btn.textContent = "場所を確認中…";
     const pos = await currentPos();
