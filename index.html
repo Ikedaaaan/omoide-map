@@ -1273,14 +1273,14 @@ function bindSwap(root){ root.querySelectorAll(".rl-img").forEach(box=>box.addEv
 
 let realTab = "today";
 function openRealHistory(){
-  const all = Object.values(reals).sort((a,b)=>b.at-a.at);
+  const all = Object.values(reals).filter(r=>me && r.uid===me.uid).sort((a,b)=>b.at-a.at);   // 自分の投稿だけ
   const days = {}; all.forEach(r=>{ (days[r.date] = days[r.date] || []).push(r); });
   const keys = Object.keys(days).sort().reverse();
   openSheet(`<h2>⚡ おもいでタイム</h2>
     <div class="rtabs"><button id="tToday">今日</button><button class="on">これまで</button></div>
-    ${keys.length ? `<p class="hint">これまでの投稿 ${all.length}件(${keys.length}日分)</p>` + keys.map(d=>`<div class="rday">${mdText(d)}${d===jstDate()?"(今日)":""}</div>
+    ${keys.length ? `<p class="hint">自分のこれまでの投稿 ${all.length}件(${keys.length}日分)</p>` + keys.map(d=>`<div class="rday">${mdText(d)}${d===jstDate()?"(今日)":""}</div>
       <div class="rgrid">${days[d].map(r=>`<div class="rcell${realHidden(r)?" blur":""}" data-id="${esc(r.id)}"><img src="${esc(r.thumb||"")}" alt=""><span>${esc(who(r.uid))}${r.late?" ⏰":" ⚡"}</span></div>`).join("")}</div>`).join("")
-      : `<p class="hint">まだ投稿がありません</p>`}
+      : `<p class="hint">まだ自分の投稿がありません</p>`}
     <div class="row"><button class="btn s" id="hClose">閉じる</button></div>`);
   realTab = "history";
   $("#tToday").onclick = ()=>{ realTab = "today"; openRealFeed(); };
