@@ -6,6 +6,9 @@
 <meta name="theme-color" content="#ff6b4a">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>おもいでマップ</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="おもいで">
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <style>
@@ -75,6 +78,29 @@
   .prof-note.empty{color:var(--sub)}
   .prof-row{margin-top:8px;font-size:13px;color:var(--sub)}
   .member{cursor:pointer}
+  /* おもいでタイム */
+  #realBar{position:fixed;left:12px;right:12px;bottom:calc(var(--sb) + 112px);z-index:560;background:#111;color:#fff;border-radius:18px;padding:10px 10px 10px 16px;
+    display:none;align-items:center;gap:10px;box-shadow:0 6px 18px rgba(0,0,0,.3)}
+  #realBar.show{display:flex}
+  #realBar b{flex:1;font-size:14px}
+  #realBar button{border:none;border-radius:12px;background:var(--accent);color:#fff;font-weight:800;padding:10px 14px;font-family:inherit}
+  #bReal{position:relative}
+  .rdot{position:absolute;right:6px;top:6px;width:10px;height:10px;border-radius:50%;background:#ff3b30;border:2px solid #fff;display:none}
+  .rpin{position:relative;width:58px;height:58px;cursor:pointer}
+  .rpic{width:58px;height:58px;border-radius:16px;border:3px solid #ffd60a;background:#222;overflow:hidden;box-sizing:border-box;box-shadow:0 3px 10px rgba(0,0,0,.35)}
+  .rpic img{width:100%;height:100%;object-fit:cover;display:block}
+  .rpic.blur img{filter:blur(8px)}
+  .rbadge{position:absolute;right:-6px;top:-6px;width:22px;height:22px;border-radius:50%;background:#ffd60a;font-size:12px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.3)}
+  .rl-card{margin-bottom:18px}
+  .rl-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:14px;flex-wrap:wrap}
+  .rl-img{position:relative;border-radius:18px;overflow:hidden;background:#111;aspect-ratio:3/4;width:100%}
+  .rl-img .bk{width:100%;height:100%;object-fit:cover;display:block}
+  .rl-img .fr{position:absolute;left:10px;top:10px;width:30%;aspect-ratio:3/4;object-fit:cover;border-radius:12px;border:2px solid #111}
+  .rl-img.blur img{filter:blur(22px)}
+  .rl-ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#aaa;font-weight:700}
+  .rl-lock{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;text-align:center;padding:20px;background:rgba(0,0,0,.25)}
+  .late{color:#d9443a;font-weight:800;font-size:12px}
+  .ontime{color:#1f9d60;font-weight:800;font-size:12px}
   .frpin-in.old{opacity:.6}
   .frpin-in.fuzzy .frpic{border-style:dashed}
   .mebase{position:relative;width:200px;height:200px;pointer-events:none}
@@ -161,6 +187,7 @@
   <button class="sbtn" id="bMembers" title="メンバー・招待">👥</button>
   <button class="sbtn" id="bSettings" title="設定">⚙️</button>
   <button class="sbtn" id="bCompass" title="向きを表示">🧭</button>
+  <button class="sbtn" id="bReal" title="おもいでタイム">📸<span class="rdot" id="rDot"></span></button>
 </div>
 <div class="bottom" id="bottomUI" style="display:none">
   <button class="bbtn" id="bList" title="一覧">🔍</button>
@@ -181,6 +208,7 @@
 <div class="ov" id="ov"><div class="sheet" id="sheet"></div></div>
 <div class="screen" id="screen"><div class="card" id="card"></div></div>
 <div class="toast" id="toast"></div>
+<div id="realBar"><b id="realText"></b><button id="realShoot">撮る</button></div>
 
 <script type="module">
 /* =========================================================
@@ -200,6 +228,7 @@ const firebaseConfig = {
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getMessaging, getToken, onMessage, isSupported } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
 import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -389,8 +418,8 @@ if(!configured){
   getRedirectResult(auth).catch(e=>toast(errMsg(e)));
   onAuthStateChanged(auth, u=>{
     me = u;
-    if(!u){ stopListening(); stopMyGroups(); setMainUI(false); showLogin(); return; }
-    listenMyGroups();
+    if(!u){ stopListening(); stopMyGroups(); stopDaily(); setMainUI(false); showLogin(); return; }
+    listenMyGroups(); listenDaily();
     const saved = LS.get("omoide.gid");
     if(saved){ enterGroup(saved).catch(()=>{ LS.del("omoide.gid"); showGroupScreen(); }); }
     else showGroupScreen();
@@ -468,6 +497,7 @@ async function enterGroup(id){
   try{ await setDoc(doc(db,"users",me.uid,"groups",id), { name: gname, joinedAt: Date.now() }, { merge:true }); }catch(_){}
   LS.set("omoide.gid", id);
   hideScreen(); setMainUI(true); startListening();
+  if(new URLSearchParams(location.search).get("real")){ history.replaceState(null, "", location.pathname); setTimeout(()=>{ if(daily && daily.date===jstDate() && !postedToday()) openRealCapture(); else openRealFeed(); }, 1500); }
   lastSent = { t:0, lat:0, lng:0 };
   if(shareMode()!=="off"){ startLocate(false); sendLoc(true); }
   else { try{ const st = await navigator.permissions.query({ name:"geolocation" }); if(st.state==="granted") startLocate(false); }catch(_){} }
@@ -563,7 +593,7 @@ function drawFriends(){
 }
 setInterval(drawFriends, 60000);
 document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) sendLoc(true); });
-function stopListening(){ unsubs.forEach(f=>{try{f()}catch(_){}}); unsubs=[]; spots=[]; members={}; locs={}; clearMarkers(); drawFriends(); }
+function stopListening(){ unsubs.forEach(f=>{try{f()}catch(_){}}); unsubs=[]; spots=[]; members={}; locs={}; reals={}; clearMarkers(); drawFriends(); drawReals(); }
 function clearMarkers(){ markerObjs.forEach(m=>m.remove()); markerObjs=[]; }
 let firstFit = true;
 function startListening(){
@@ -583,6 +613,10 @@ function startListening(){
     locs = {}; snap.docs.forEach(d=>locs[d.id]=d.data());
     drawFriends();
   }, e=>{}));
+  unsubs.push(onSnapshot(collection(db,"groups",gid,"reals"), snap=>{
+    reals = {}; snap.docs.forEach(d=>reals[d.id]={ id:d.id, ...d.data() });
+    drawReals(); updateRealUI();
+  }, e=>{}));
 }
 
 // ---------- 描画 ----------
@@ -594,6 +628,7 @@ function renderPill(){
 function renderChips(){
   const cnt={}; spots.forEach(s=>cnt[s.genre||"other"]=(cnt[s.genre||"other"]||0)+1);
   const items=[{k:"all",label:"すべて",emoji:"✨"}].concat(GENRES.filter(g=>cnt[g.k]));
+  if(Object.keys(reals).length) items.push({k:"real",label:"おもいでタイム",emoji:"⚡"});
   $("#chips").innerHTML = items.length>2 || filter!=="all" ? items.map(g=>`<button class="chip ${filter===g.k?"on":""}" data-k="${g.k}">${g.emoji} ${esc(g.label)}</button>`).join("") : "";
 }
 $("#pill").onclick = ()=>openGroupSheet();
@@ -607,7 +642,7 @@ function markerEl(s){
   return el;
 }
 function renderAll(){
-  renderPill(); renderChips();
+  renderPill(); renderChips(); drawReals();
   clearMarkers();
   const pts = visible().filter(s=>typeof s.lat==="number" && typeof s.lng==="number");
   pts.forEach(s=>{ markerObjs.push(new maplibregl.Marker({ element: markerEl(s), anchor:"top-left", offset:[-26,-52] }).setLngLat([s.lng, s.lat]).addTo(map)); });
@@ -804,6 +839,214 @@ function openForm(s, pos, st){
   };
 }
 
+// ---------- おもいでタイム(BeReal風) ----------
+// 毎日12〜21時のランダムな時刻に通知 → 外カメ・インカメで撮影 → 撮った場所に⚡ピンとして残る
+const VAPID_KEY = "BCZeVGl2Of9j-s7AkV-pTzlNxI5jdZMpRIvBJHzrftqg6IrsaaVH2EJDgGR8zeq2FRklMtcUTR4IJHVM24v4_1g";
+const REAL_LIMIT = 2*60*1000;   // 2分を過ぎたら遅刻
+const jstDate = (t=Date.now()) => new Date(t + 9*3600*1000).toISOString().slice(0,10);
+let daily = null, dailyDate = null, unsubDaily = null, reals = {}, realMarkers = [];
+const myRealId = () => jstDate() + "_" + (me ? me.uid : "");
+const postedToday = () => !!(me && reals[myRealId()]);
+function listenDaily(){
+  const d = jstDate(); if(d === dailyDate && unsubDaily) return;
+  if(unsubDaily){ try{unsubDaily()}catch(_){} }
+  dailyDate = d; daily = null;
+  unsubDaily = onSnapshot(doc(db,"daily",d), s=>{ daily = s.exists() ? s.data() : null; updateRealUI(); }, e=>{});
+}
+function stopDaily(){ if(unsubDaily){ try{unsubDaily()}catch(_){} unsubDaily=null; } daily=null; dailyDate=null; updateRealUI(); }
+setInterval(()=>{ if(me && jstDate()!==dailyDate){ listenDaily(); drawReals(); } }, 60000);
+
+function hhmm(t){ const d=new Date(t); return `${d.getHours()}:${String(d.getMinutes()).padStart(2,"0")}`; }
+function mdText(date){ const m=/^\d{4}-(\d{2})-(\d{2})$/.exec(date||""); return m ? `${+m[1]}/${+m[2]}` : ""; }
+const realHidden = r => r.date===jstDate() && me && r.uid!==me.uid && !postedToday();   // 自分が撮るまで今日の友達の投稿はぼかす
+
+function drawReals(){
+  realMarkers.forEach(m=>m.remove()); realMarkers=[];
+  if(!me || (filter!=="all" && filter!=="real")) return;
+  for(const r of Object.values(reals)){
+    if(typeof r.lat!=="number" || typeof r.lng!=="number") continue;
+    const el = document.createElement("div");
+    el.innerHTML = `<div class="rpin"><div class="rpic${realHidden(r)?" blur":""}">${r.thumb?`<img src="${esc(r.thumb)}" alt="">`:""}</div><div class="rbadge">⚡</div>${members[r.uid]?`<div class="mk-who">${avatarHTML(members[r.uid],22)}</div>`:""}<div class="plabel"><b>${esc(who(r.uid))}</b><span>${mdText(r.date)} ${hhmm(r.at)}</span></div></div>`;
+    el.addEventListener("click", e=>{ e.stopPropagation(); openReal(r.id); });
+    realMarkers.push(new maplibregl.Marker({ element: el, anchor:"center" }).setLngLat([r.lng, r.lat]).addTo(map));
+  }
+}
+
+// 下の帯(カウントダウン)と📸ボタンの赤丸
+function updateRealUI(){
+  const bar = $("#realBar"), dot = $("#rDot");
+  if(!bar) return;
+  const active = !!(me && gid && daily && daily.date===jstDate() && !postedToday());
+  bar.classList.toggle("show", active);
+  if(active){
+    const left = REAL_LIMIT - (Date.now() - daily.at);
+    $("#realText").textContent = left > 0
+      ? `⚡ おもいでタイム！ 残り ${Math.floor(left/60000)}:${String(Math.floor(left/1000)%60).padStart(2,"0")}`
+      : `⏰ おもいでタイム(${Math.ceil((-left)/60000)}分遅刻中)`;
+  }
+  const todays = Object.values(reals).filter(r=>r.date===jstDate() && me && r.uid!==me.uid).length;
+  dot.style.display = (active || todays) ? "block" : "none";
+}
+setInterval(updateRealUI, 1000);
+
+async function currentPos(){
+  if(myPos) return { lat: myPos[0], lng: myPos[1] };
+  return await new Promise(res=>{
+    if(!navigator.geolocation) return res(null);
+    navigator.geolocation.getCurrentPosition(p=>res({ lat:p.coords.latitude, lng:p.coords.longitude }), ()=>res(null), { enableHighAccuracy:true, timeout:10000, maximumAge:30000 });
+  });
+}
+
+function openRealCapture(){
+  if(!gid){ toast("グループに入ってから使えます"); return; }
+  if(!daily || daily.date!==jstDate()){ toast("今日のおもいでタイムはまだです(12〜21時のどこかで通知が来ます)"); return; }
+  if(postedToday()){ openRealFeed(); return; }
+  const st = { back:null, front:null };
+  openSheet(`<h2>⚡ おもいでタイム</h2>
+    <p class="hint">外カメ→インカメの順に撮ってね。撮った写真は<b>今いる場所</b>に、地図のピンとして残ります。</p>
+    <div class="rl-img" id="rPrev"><div class="rl-ph">📷 まだ撮っていません</div></div>
+    <div class="row">
+      <label class="btn p" id="rBackL">① 外カメで撮る<input type="file" id="rBack" accept="image/*" capture="environment" hidden></label>
+      <label class="btn s" id="rFrontL">② インカメで撮る<input type="file" id="rFront" accept="image/*" capture="user" hidden></label>
+    </div>
+    <label class="f">ひとこと(なくてもOK)</label>
+    <input type="text" id="rCap" maxlength="40" placeholder="例：図書館で課題中…">
+    <div class="row"><button class="btn s" id="rClose">あとで</button><button class="btn p" id="rPost" disabled>投稿する</button></div>`);
+  const prev = ()=>{
+    $("#rPrev").innerHTML = st.back ? `<img class="bk" src="${st.back}" alt="">${st.front?`<img class="fr" src="${st.front}" alt="">`:""}` : `<div class="rl-ph">📷 まだ撮っていません</div>`;
+    $("#rPost").disabled = !st.back;
+    $("#rBackL").className = "btn " + (st.back ? "s" : "p");
+    $("#rFrontL").className = "btn " + (st.back && !st.front ? "p" : "s");
+  };
+  const load = async (input, key, max)=>{
+    const f = input.files && input.files[0]; if(!f) return;
+    try{
+      const img = await loadImage(f);
+      let data = toDataURL(img, max, false, 0.72);
+      if(key==="back" && data.length > 600000) data = toDataURL(img, 720, false, 0.6);
+      st[key] = data;
+      if(key==="back") st.thumb = toDataURL(img, 140, true, 0.7);
+      prev();
+    }catch(_){ toast("写真を読み込めませんでした"); }
+  };
+  $("#rBack").addEventListener("change", e=>load(e.target, "back", 1000));
+  $("#rFront").addEventListener("change", e=>load(e.target, "front", 400));
+  $("#rClose").onclick = closeSheet;
+  $("#rPost").onclick = async ()=>{
+    const btn = $("#rPost"); btn.disabled = true; btn.textContent = "場所を確認中…";
+    const pos = await currentPos();
+    if(!pos){ toast("位置情報が取れませんでした。位置情報を許可してね(写真をその場所に残すために使います)"); btn.disabled=false; btn.textContent="投稿する"; return; }
+    btn.textContent = "投稿中…";
+    const now = Date.now(), diff = now - daily.at;
+    const id = myRealId();
+    const light = { uid: me.uid, date: jstDate(), at: now, late: diff > REAL_LIMIT ? Math.ceil((diff-REAL_LIMIT)/60000) : 0,
+      lat: pos.lat, lng: pos.lng, thumb: st.thumb, caption: $("#rCap").value.trim().slice(0,40) };
+    try{
+      const ids = allGroupIds();
+      for(const g of ids){
+        await setDoc(doc(db,"groups",g,"reals",id), light);
+        await setDoc(doc(db,"groups",g,"realimg",id), { back: st.back, front: st.front || "" });
+      }
+      toast(light.late ? `投稿しました(${light.late}分遅刻)` : "⚡ 時間内に投稿しました！");
+      closeSheet(); setView([pos.lat, pos.lng], Math.max(map.getZoom(),16));
+      setTimeout(openRealFeed, 600);
+    }catch(e){ toast(errMsg(e)); btn.disabled=false; btn.textContent="投稿する"; }
+  };
+}
+
+function realCardHTML(r, img){
+  const hidden = realHidden(r);
+  return `<div class="rl-card">
+    <div class="rl-head">${avatarHTML(members[r.uid],28)}<b>${esc(who(r.uid))}</b><span class="hint" style="margin:0">${mdText(r.date)} ${hhmm(r.at)}</span>
+      ${r.late ? `<span class="late">${r.late}分遅刻</span>` : `<span class="ontime">⚡時間内</span>`}</div>
+    <div class="rl-img${hidden?" blur":""}" data-id="${esc(r.id)}">
+      ${img ? `<img class="bk" src="${esc(img.back)}" alt="">${img.front?`<img class="fr" src="${esc(img.front)}" alt="">`:""}` : (r.thumb?`<img class="bk" src="${esc(r.thumb)}" alt="">`:"")}
+      ${hidden ? `<div class="rl-lock">🔒 自分が投稿すると見られます</div>` : ""}
+    </div>
+    ${r.caption && !hidden ? `<div class="hint" style="font-size:14px;color:var(--ink)">${esc(r.caption)}</div>` : ""}
+  </div>`;
+}
+async function loadRealImg(id){ try{ const s = await getDoc(doc(db,"groups",gid,"realimg",id)); return s.exists() ? s.data() : null; }catch(_){ return null; } }
+function bindSwap(root){ root.querySelectorAll(".rl-img").forEach(box=>box.addEventListener("click", ()=>{ if(box.classList.contains("blur")) return; const b=box.querySelector(".bk"), f=box.querySelector(".fr"); if(b&&f){ const t=b.src; b.src=f.src; f.src=t; } })); }
+
+async function openRealFeed(){
+  const today = Object.values(reals).filter(r=>r.date===jstDate()).sort((a,b)=>a.at-b.at);
+  const head = !daily || daily.date!==jstDate()
+    ? `<p class="hint">今日のおもいでタイムはまだです。12〜21時のどこかで通知が来ます。</p>`
+    : (postedToday() ? "" : `<div class="row" style="margin-top:0"><button class="btn p" id="fShoot">📸 今すぐ撮る</button></div>`);
+  openSheet(`<h2>⚡ 今日のおもいでタイム</h2>${head}
+    <div id="fList">${today.length ? today.map(r=>realCardHTML(r, null)).join("") : `<p class="hint">まだ誰も投稿していません</p>`}</div>
+    <p class="hint">過去の投稿は、地図の⚡ピンからいつでも見返せます。</p>
+    <div class="row"><button class="btn s" id="fClose">閉じる</button></div>`);
+  $("#fClose").onclick = closeSheet;
+  if($("#fShoot")) $("#fShoot").onclick = openRealCapture;
+  // 大きい写真はあとから読み込む(ぼかし中のものは読み込まない)
+  for(const r of today){
+    if(realHidden(r)) continue;
+    const img = await loadRealImg(r.id); if(!img) continue;
+    const box = $("#fList") && $("#fList").querySelector(`.rl-img[data-id="${CSS.escape(r.id)}"]`);
+    if(box){ box.innerHTML = `<img class="bk" src="${esc(img.back)}" alt="">${img.front?`<img class="fr" src="${esc(img.front)}" alt="">`:""}`; }
+  }
+  if($("#fList")) bindSwap($("#fList"));
+}
+async function openReal(id){
+  const r = reals[id]; if(!r) return;
+  const mine = me && r.uid===me.uid;
+  openSheet(`<h2>⚡ おもいでタイム</h2><div id="rOne">${realCardHTML(r, null)}</div>
+    <div class="row">${mine?`<button class="btn d" id="rDel">🗑️ 削除</button>`:""}<button class="btn s" id="rClose2">閉じる</button></div>`);
+  $("#rClose2").onclick = closeSheet;
+  if(mine) $("#rDel").onclick = ()=>{
+    openSheet(`<h2>この投稿を削除しますか？</h2><p class="hint">参加しているすべてのグループから消えます。元に戻せません。</p>
+      <div class="row"><button class="btn s" id="rdNo">やめる</button><button class="btn d" id="rdYes">削除する</button></div>`);
+    $("#rdNo").onclick = ()=>openReal(id);
+    $("#rdYes").onclick = async ()=>{
+      try{
+        for(const g of allGroupIds()){
+          try{ await deleteDoc(doc(db,"groups",g,"realimg",id)); }catch(_){}
+          try{ await deleteDoc(doc(db,"groups",g,"reals",id)); }catch(_){}
+        }
+        closeSheet(); toast("削除しました");
+      }catch(e){ toast(errMsg(e)); }
+    };
+  };
+  if(realHidden(r)) return;
+  const img = await loadRealImg(id);
+  const box = $("#rOne") && $("#rOne").querySelector(".rl-img");
+  if(box && img){ box.innerHTML = `<img class="bk" src="${esc(img.back)}" alt="">${img.front?`<img class="fr" src="${esc(img.front)}" alt="">`:""}`; bindSwap($("#rOne")); }
+}
+
+// 通知の登録(iPhoneはホーム画面に追加したアプリからのみ)
+const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+let fcm = null;
+async function enablePush(){
+  if(isIOS && !isStandalone()){ toast("先に「ホーム画面に追加」して、そこから開いてね"); return; }
+  if(typeof Notification==="undefined"){ toast("この端末・ブラウザは通知に対応していません"); return; }
+  const perm = await Notification.requestPermission();   // ボタンを押した直後に確認画面を出す
+  if(perm !== "granted"){ toast("通知が許可されませんでした(設定 → 通知 から変えられます)"); return; }
+  try{
+    if(!(await isSupported())){ toast("この端末は通知に対応していません"); return; }
+    const reg = await navigator.serviceWorker.register("./firebase-messaging-sw.js");
+    fcm = fcm || getMessaging(app);
+    const token = await getToken(fcm, { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
+    if(!token){ toast("通知の登録に失敗しました"); return; }
+    const hb = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+    const tid = [...new Uint8Array(hb)].slice(0,16).map(b=>b.toString(16).padStart(2,"0")).join("");
+    await setDoc(doc(db,"users",me.uid,"push",tid), { token, createdAt: Date.now() });
+    LS.set("omoide.push", tid);
+    onMessage(fcm, ()=>{ listenDaily(); toast("⚡ おもいでタイム！ 下の帯から撮ってね"); });
+    toast("🔔 通知をオンにしました");
+  }catch(e){ toast("通知の登録に失敗しました(" + (e && (e.code||e.message) || e) + ")"); }
+}
+function pushStatusText(){
+  if(isIOS && !isStandalone()) return "iPhoneでは、Safariの共有ボタン →「ホーム画面に追加」をして、ホーム画面のアイコンから開くと通知をオンにできます。";
+  if(typeof Notification!=="undefined" && Notification.permission==="granted" && LS.get("omoide.push")) return "🔔 通知はオンです(毎日12〜21時のどこかで届きます)";
+  return "毎日12〜21時のどこかで「⚡おもいでタイム」の通知が届きます。";
+}
+
+$("#bReal").onclick = ()=>openRealFeed();
+$("#realShoot").onclick = ()=>openRealCapture();
+
 // ---------- プロフィール ----------
 // 自分のプロフィールは端末にも保存して、参加している全部のグループに反映する
 function myProfileLS(){ try{ return JSON.parse(LS.get("omoide.profile")||"{}"); }catch(_){ return {}; } }
@@ -925,6 +1168,9 @@ $("#bSettings").onclick = ()=>{
       <div class="icgrid" id="icColors">${ICON_COLORS.map(c=>`<button type="button" data-c="${c}" style="background:${c}" aria-label="色 ${c}"></button>`).join("")}</div>
       <div class="row"><button class="btn p" id="icEmojiOk">この絵文字にする</button></div>
     </div>
+    <label class="f">🔔 おもいでタイムの通知</label>
+    <div class="hint" id="pushStat">${pushStatusText()}</div>
+    ${isIOS && !isStandalone() ? "" : `<div class="row" style="margin-top:8px"><button class="btn s" id="sPush">通知をオンにする</button></div>`}
     <label class="f">現在地の共有</label>
     <div class="tabs2" id="shareSeg" style="margin-top:0">
       <button data-v="off">共有しない</button><button data-v="on">共有する</button><button data-v="fuzzy">あいまい</button>
@@ -940,6 +1186,7 @@ $("#bSettings").onclick = ()=>{
   $("#sSwitch").onclick=()=>openGroupSheet();
   $("#sOut").onclick=async ()=>{ closeSheet(); await clearMyLocs(); LS.del("omoide.gid"); LS.del("omoide.icon"); LS.del("omoide.share"); LS.del("omoide.profile"); signOut(auth); };
 
+  if($("#sPush")) $("#sPush").onclick = async ()=>{ await enablePush(); const el=$("#pushStat"); if(el) el.textContent = pushStatusText(); };
   const markShare = ()=>[...$("#shareSeg").children].forEach(b=>b.classList.toggle("on", b.dataset.v===shareMode()));
   markShare();
   $("#shareSeg").onclick = async e=>{
