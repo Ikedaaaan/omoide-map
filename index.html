@@ -751,7 +751,7 @@ function endPick(){ $("#pick").style.display="none"; setMainUI(true); }
 $("#pCancel").onclick = ()=>{ const cb=pickCb; pickCb=null; endPick(); if(cb) cb(null); };
 $("#pHere").onclick = ()=>{ startOrientation(); startLocate(true); };
 $("#pOk").onclick = ()=>{ const c=map.getCenter(); const cb=pickCb; pickCb=null; endPick(); if(cb) cb({lat:c.lat, lng:c.lng}); };
-$("#bAdd").onclick = ()=>startPick(pos=>{ if(pos) openForm(null, pos); });
+$("#bAdd").onclick = ()=>openAddChooser();
 
 // ---------- 写真処理 ----------
 function readExifGps(buf){
@@ -872,6 +872,143 @@ $("#vDel").onclick = async ()=>{
 { let sx = null;
   $("#viewer").addEventListener("touchstart", e=>{ sx = e.touches[0].clientX; }, { passive:true });
   $("#viewer").addEventListener("touchend", e=>{ if(sx===null) return; const dx = e.changedTouches[0].clientX - sx; sx = null; if(Math.abs(dx) > 50) stepViewer(dx < 0 ? 1 : -1); });
+}
+
+// ---------- 写真から作る(撮影場所を読み取ってアルバムを作る) ----------
+// 写真の撮影日時(EXIF DateTimeOriginal)。読めなければ null
+function readExifDate(buf){
+  try{
+    const v=new DataView(buf); if(v.byteLength<4||v.getUint16(0)!==0xFFD8) return null;
+    let o=2;
+    while(o+4<v.byteLength){
+      const m=v.getUint16(o); if((m&0xFF00)!==0xFF00||m===0xFFDA) return null;
+      const len=v.getUint16(o+2);
+      if(m===0xFFE1 && o+10<v.byteLength && v.getUint32(o+4)===0x45786966){
+        const t=o+10, le=v.getUint16(t)===0x4949, u16=p=>v.getUint16(p,le), u32=p=>v.getUint32(p,le);
+        const ifd0=t+u32(t+4); let ex=0;
+        for(let i=0;i<u16(ifd0);i++){ const e=ifd0+2+i*12; if(u16(e)===0x8769) ex=t+u32(e+8); }
+        if(!ex) return null;
+        for(let i=0;i<u16(ex);i++){ const e=ex+2+i*12; if(u16(e)===0x9003){ const p=t+u32(e+8); let s=""; for(let k=0;k<19;k++) s+=String.fromCharCode(v.getUint8(p+k));
+          const mm=/^(\d{4}):(\d{2}):(\d{2})/.exec(s); return mm ? `${mm[1]}-${mm[2]}-${mm[3]}` : null; } }
+        return null;
+      }
+      o+=2+len;
+    }
+  }catch(_){}
+  return null;
+}
+async function uploadAlbumPhoto(spotId, file){
+  const img = await loadImage(file);
+  let full = toDataURL(img, 1280, false, 0.75);
+  if(full.length > 850000) full = toDataURL(img, 960, false, 0.6);
+  const thumb = toDataURL(img, 200, true, 0.7);
+  const ref = await addDoc(collection(db,"groups",gid,"album"), { spotId, uid: me.uid, at: Date.now(), thumb });
+  await setDoc(doc(db,"groups",gid,"albimg",ref.id), { data: full });
+}
+
+let imp = null;   // 読み込み中の状態 { groups:[{pos,files,urls,date}], i, made }
+function openAddChooser(){
+  openSheet(`<h2>＋ 記録する</h2>
+    <div class="row" style="flex-direction:column;gap:10px">
+      <button class="btn p" id="adMap" style="width:100%">📍 地図で場所を選んで記録</button>
+      <button class="btn p" id="adPhoto" style="width:100%">📷 写真から作る(撮影場所を自動で読み取り)</button>
+      <button class="btn s" id="adNo" style="width:100%">やめる</button>
+    </div>`);
+  $("#adMap").onclick = ()=>startPick(pos=>{ if(pos) openForm(null, pos); });
+  $("#adPhoto").onclick = openPhotoImport;
+  $("#adNo").onclick = closeSheet;
+}
+function openPhotoImport(){
+  openSheet(`<h2>📷 写真から作る</h2>
+    <p class="hint">写真をまとめて選ぶと、撮影した場所ごとに分けて、その場所にアルバムを作ります。近い場所(約100m以内)の写真は1つにまとめます。</p>
+    <p class="hint">📌 iPhoneで選ぶとき、写真を選ぶ画面の上の「オプション」で<b>「位置情報」</b>をオンにしてね(オフだと場所が読み取れません)。</p>
+    <label class="btn p" style="display:block;text-align:center;margin-top:10px">写真を選ぶ<input type="file" id="impFiles" accept="image/*" multiple hidden></label>
+    <div class="hint" id="impMsg"></div>
+    <div class="row"><button class="btn s" id="impNo">やめる</button></div>`);
+  $("#impNo").onclick = closeSheet;
+  $("#impFiles").addEventListener("change", async e=>{
+    const files = [...(e.target.files||[])].slice(0, 60); if(!files.length) return;
+    $("#impMsg").textContent = "撮影場所を読み取り中…";
+    const withPos = [], noPos = [];
+    for(const f of files){
+      let pos=null, date=null;
+      try{ const buf = await f.slice(0, 256*1024).arrayBuffer(); pos = readExifGps(buf); date = readExifDate(buf); }catch(_){}
+      (pos ? withPos : noPos).push({ f, pos, date });
+    }
+    // 近い写真(100m以内)をまとめる
+    const groups = [];
+    for(const p of withPos){
+      let g = groups.find(g=>distM(g.pos, p.pos) <= 100);
+      if(!g){ g = { pos:{...p.pos}, items:[] }; groups.push(g); }
+      g.items.push(p);
+      g.pos = { lat: g.items.reduce((a,x)=>a+x.pos.lat,0)/g.items.length, lng: g.items.reduce((a,x)=>a+x.pos.lng,0)/g.items.length };
+    }
+    if(noPos.length) groups.push({ pos:null, items:noPos });
+    groups.forEach(g=>{ g.files = g.items.map(x=>x.f); g.date = g.items.map(x=>x.date).filter(Boolean).sort()[0] || ""; g.urls = g.files.slice(0,6).map(f=>{ try{ return URL.createObjectURL(f); }catch(_){ return ""; } }); });
+    imp = { groups, i:0, made:0, total: files.length, found: withPos.length };
+    if(!withPos.length){
+      $("#impMsg").innerHTML = `⚠️ ${files.length}枚とも撮影場所が読み取れませんでした。<br>写真を選ぶ画面の「オプション」→「位置情報」をオンにして、もう一度選んでみてね。<br><button type="button" class="btn s" id="impAnyway" style="margin-top:8px;width:100%">場所は地図で選んで続ける</button>`;
+      $("#impAnyway").onclick = ()=>impStep();
+      return;
+    }
+    impStep();
+  });
+}
+// まとめた場所ごとに1つずつ確認して保存する
+function impStep(keep){
+  if(!imp) return;
+  const g = imp.groups[imp.i];
+  if(!g){
+    imp.groups.forEach(g=>g.urls.forEach(u=>{ try{ URL.revokeObjectURL(u); }catch(_){ } }));
+    const made = imp.made; imp = null; closeSheet();
+    toast(made ? `📚 ${made}か所に写真を保存しました` : "保存しませんでした");
+    return;
+  }
+  keep = keep || {};
+  const near = g.pos ? spots.map(s=>({ s, d: distM(g.pos, {lat:s.lat,lng:s.lng}) })).filter(x=>x.d<=80).sort((a,b)=>a.d-b.d)[0] : null;
+  let genre = keep.genre || "meal";
+  openSheet(`<h2>📷 ${imp.i+1} / ${imp.groups.length} か所目</h2>
+    ${imp.i===0 ? `<p class="hint">${imp.total}枚中 ${imp.found}枚で撮影場所がわかりました。</p>` : ""}
+    <div class="al-grid">${g.urls.map(u=>`<img class="al-th" src="${esc(u)}" alt="">`).join("")}</div>
+    <p class="hint">${g.files.length}枚${g.files.length>6?"(先頭6枚を表示)":""}${g.date?` ・ 撮影日 ${esc(g.date)}`:""}<br>${g.pos ? "📍 写真の撮影場所に保存します" : "📍 場所がわからない写真です。地図で場所を選んでね"}</p>
+    <button type="button" class="btn s" id="impPick" style="width:100%">${g.pos ? "地図で場所を確認・調整" : "地図で場所を選ぶ"}</button>
+    ${near ? `<div class="note" style="margin-top:12px">近くに「<b>${esc(near.s.name)}</b>」の記録があります(約${Math.round(near.d)}m)。<button type="button" class="btn p" id="impJoin" style="margin-top:8px;width:100%">「${esc(near.s.name)}」のアルバムに追加</button></div>
+      <p class="hint" style="margin-top:12px">別のお店として新しく作る場合は ↓</p>` : ""}
+    <label class="f">お店・場所の名前 *</label>
+    <input type="text" id="impName" maxlength="60" placeholder="例：〇〇カフェ" value="${esc(keep.name||"")}">
+    <label class="f">ジャンル</label>
+    <div class="genres" id="impGenre">${GENRES.map(x=>`<button type="button" data-k="${x.k}" class="${x.k===genre?"on":""}">${x.emoji} ${x.label}</button>`).join("")}</div>
+    <div class="row"><button class="btn s" id="impSkip">この場所はスキップ</button><button class="btn p" id="impSave">新しく作って保存</button></div>`);
+  $("#impGenre").onclick = e=>{ const b=e.target.closest("button"); if(!b) return; genre=b.dataset.k; [...$("#impGenre").children].forEach(x=>x.classList.toggle("on",x===b)); };
+  $("#impPick").onclick = ()=>{
+    const k = { name: $("#impName").value, genre };
+    startPick(p=>{ if(p) g.pos = p; impStep(k); }, g.pos || undefined);
+  };
+  $("#impSkip").onclick = ()=>{ imp.i++; impStep(); };
+  const busy = on=>{ ["#impSave","#impSkip","#impPick","#impJoin"].forEach(s=>{ const b=$(s); if(b) b.disabled=on; }); };
+  if(near) $("#impJoin").onclick = async ()=>{
+    busy(true);
+    let ok=0; for(let j=0;j<g.files.length;j++){ toast(`アップロード中… ${j+1}/${g.files.length}`); try{ await uploadAlbumPhoto(near.s.id, g.files[j]); ok++; }catch(e){ toast(errMsg(e)); } }
+    if(ok) imp.made++;
+    imp.i++; impStep();
+  };
+  $("#impSave").onclick = async ()=>{
+    const name = $("#impName").value.trim();
+    if(!name){ toast("名前を入れてね"); $("#impName").focus(); return; }
+    if(!g.pos){ toast("先に地図で場所を選んでね"); return; }
+    busy(true); $("#impSave").textContent = "保存中…";
+    try{
+      const ph = await makePhotos(g.files[0]);
+      const body = { name, genre, rating:3, visited: g.date || todayStr(), note:"", lat:g.pos.lat, lng:g.pos.lng,
+        updatedAt:Date.now(), createdBy:me.uid, createdAt:Date.now(), thumb:ph.thumb, hasPhoto:true };
+      const ref = await addDoc(collection(db,"groups",gid,"spots"), body);
+      await setDoc(doc(db,"groups",gid,"photos",ref.id), { data: ph.full });
+      for(let j=1;j<g.files.length;j++){ toast(`アルバムに保存中… ${j}/${g.files.length-1}`); try{ await uploadAlbumPhoto(ref.id, g.files[j]); }catch(e){ toast(errMsg(e)); } }
+      imp.made++;
+      setView([g.pos.lat, g.pos.lng], Math.max(map.getZoom(), 15));
+      imp.i++; impStep();
+    }catch(e){ toast(errMsg(e)); busy(false); $("#impSave").textContent = "新しく作って保存"; }
+  };
 }
 
 // ---------- 記録フォーム ----------
