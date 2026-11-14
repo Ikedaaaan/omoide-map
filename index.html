@@ -71,6 +71,11 @@
   .avatar img{width:100%;height:100%;object-fit:cover;display:block}
   .mk-who{position:absolute;left:-6px;top:-6px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3);display:flex}
   .icgrid{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .grow{display:flex;align-items:center;gap:10px;padding:12px;border-radius:16px;background:#faf6f2;margin-bottom:8px}
+  .grow.cur{background:#fff1ec;outline:2px solid var(--accent)}
+  .grow .gname{flex:1;min-width:0;font-weight:800;font-size:15px;border:none;background:none;text-align:left;padding:6px 0;color:var(--ink);font-family:inherit}
+  .grow .gname small{display:block;font-weight:600;font-size:12px;color:var(--sub)}
+  .grow .gleave{border:none;background:none;color:#c8372d;font-size:12px;font-weight:700;padding:8px;font-family:inherit}
   .icgrid button{width:42px;height:42px;border-radius:12px;border:2px solid transparent;background:#f6f1ec;font-size:22px}
   .icgrid button.on{border-color:var(--ink)}
   .mk{cursor:pointer}
@@ -365,7 +370,8 @@ if(!configured){
   getRedirectResult(auth).catch(e=>toast(errMsg(e)));
   onAuthStateChanged(auth, u=>{
     me = u;
-    if(!u){ stopListening(); setMainUI(false); showLogin(); return; }
+    if(!u){ stopListening(); stopMyGroups(); setMainUI(false); showLogin(); return; }
+    listenMyGroups();
     const saved = LS.get("omoide.gid");
     if(saved){ enterGroup(saved).catch(()=>{ LS.del("omoide.gid"); showGroupScreen(); }); }
     else showGroupScreen();
@@ -393,7 +399,7 @@ async function hashCode(code){
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(norm));
   return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("").slice(0,40);
 }
-function showGroupScreen(){
+function showGroupScreen(backTo){
   stopListening(); setMainUI(false);
   let mode = "join";
   const render = ()=>{
@@ -405,9 +411,10 @@ function showGroupScreen(){
       <input type="text" id="gCode" maxlength="60" autocomplete="off" autocapitalize="off" placeholder="${mode==="create"?"推測されにくい言葉にしてね":"友達から聞いた合言葉"}">
       <div class="hint">${mode==="create" ? "合言葉を知っている人は誰でも参加できます。短い言葉や名前は避けてね。" : ""}</div>
       <div class="row"><button class="btn p" id="gGo">${mode==="create"?"作成して入る":"参加する"}</button></div>
-      <div class="row" style="margin-top:8px"><button class="btn s" id="gOut">ログアウト</button></div>`);
+      <div class="row" style="margin-top:8px">${backTo?`<button class="btn s" id="gBack">戻る</button>`:""}<button class="btn s" id="gOut">ログアウト</button></div>`);
     document.querySelectorAll(".tabs2 button").forEach(b=>b.onclick=()=>{ mode=b.dataset.m; render(); });
     $("#gOut").onclick = ()=>signOut(auth);
+    if(backTo) $("#gBack").onclick = ()=>enterGroup(backTo).catch(e=>toast(errMsg(e)));
     $("#gGo").onclick = async ()=>{
       const code = $("#gCode").value.trim();
       if(code.length < 8){ toast("合言葉は8文字以上にしてね"); return; }
@@ -438,15 +445,71 @@ async function enterGroup(id){
   const ic = myIconLS(); if(ic) mine.icon = ic;   // 端末に保存したアイコンをこのグループにも反映
   await setDoc(doc(db,"groups",id,"members",me.uid), mine, { merge:true });
   gid = id; gname = snap.data().name || "おもいでマップ"; gcode = LS.get("omoide.code."+id) || "";
+  try{ await setDoc(doc(db,"users",me.uid,"groups",id), { name: gname, joinedAt: Date.now() }, { merge:true }); }catch(_){}
   LS.set("omoide.gid", id);
   hideScreen(); setMainUI(true); startListening();
   lastSent = { t:0, lat:0, lng:0 };
   if(shareMode()!=="off"){ startLocate(false); sendLoc(true); }
   else { try{ const st = await navigator.permissions.query({ name:"geolocation" }); if(st.state==="granted") startLocate(false); }catch(_){} }
 }
+// ---------- 参加しているグループ(アカウントに保存) ----------
+let myGroups = {}, unsubMyGroups = null;
+function listenMyGroups(){
+  stopMyGroups();
+  unsubMyGroups = onSnapshot(collection(db,"users",me.uid,"groups"), snap=>{
+    const before = Object.keys(myGroups).sort().join();
+    myGroups = {}; snap.docs.forEach(d=>myGroups[d.id]=d.data());
+    if(Object.keys(myGroups).sort().join()!==before && shareMode()!=="off"){ lastSent = { t:0, lat:0, lng:0 }; sendLoc(true); } // 新しいグループにも位置を送る
+  }, e=>{});
+}
+function stopMyGroups(){ if(unsubMyGroups){ try{unsubMyGroups()}catch(_){} unsubMyGroups=null; } myGroups = {}; }
+const allGroupIds = () => [...new Set([...(gid?[gid]:[]), ...Object.keys(myGroups)])];
+function openGroupSheet(){
+  const list = Object.entries(myGroups).sort((a,b)=>(a[1].joinedAt||0)-(b[1].joinedAt||0));
+  if(gid && !myGroups[gid]) list.unshift([gid, { name: gname }]);
+  openSheet(`<h2>👥 グループを切り替える</h2>
+    ${list.map(([id,g])=>`<div class="grow${id===gid?" cur":""}">
+      <button class="gname" data-id="${esc(id)}">${esc(g.name||"おもいでマップ")}<small>${id===gid?"いま表示中":"タップで切り替え"}</small></button>
+      <button class="gleave" data-leave="${esc(id)}">抜ける</button></div>`).join("")}
+    <div class="row"><button class="btn p" id="gAdd">＋ 新しいグループに参加/作成</button></div>
+    <div class="row"><button class="btn s" id="gFit">📍 このグループの記録を全部表示</button><button class="btn s" id="gClose">閉じる</button></div>`);
+  $("#gClose").onclick = closeSheet;
+  $("#gFit").onclick = ()=>{ closeSheet(); const pts=visible().filter(s=>typeof s.lat==="number"); if(pts.length) fitTo(pts); else toast("まだ記録がありません"); };
+  $("#gAdd").onclick = ()=>{ const back=gid; closeSheet(); showGroupScreen(back); };
+  $("#sheet").querySelectorAll(".gname").forEach(b=>b.onclick=async ()=>{
+    const id=b.dataset.id; if(id===gid){ closeSheet(); return; }
+    closeSheet();
+    try{ await enterGroup(id); toast(`「${gname}」に切り替えました`); }
+    catch(e){ toast("このグループに入れませんでした"); }
+  });
+  $("#sheet").querySelectorAll(".gleave").forEach(b=>b.onclick=()=>confirmLeave(b.dataset.leave, (myGroups[b.dataset.leave]||{}).name || gname));
+}
+function confirmLeave(id, name){
+  openSheet(`<h2>「${esc(name)}」から抜けますか？</h2>
+    <p class="hint">メンバー一覧から外れ、このグループへの現在地の共有も止まります。あなたが残した記録は残ります。もう一度入るには合言葉が必要です。</p>
+    <div class="row"><button class="btn s" id="lNo">やめる</button><button class="btn d" id="lYes">抜ける</button></div>`);
+  $("#lNo").onclick = openGroupSheet;
+  $("#lYes").onclick = async ()=>{
+    $("#lYes").disabled = true;
+    try{
+      try{ await deleteDoc(doc(db,"groups",id,"locs",me.uid)); }catch(_){}
+      await deleteDoc(doc(db,"groups",id,"members",me.uid));
+      await deleteDoc(doc(db,"users",me.uid,"groups",id));
+      LS.del("omoide.code."+id);
+      closeSheet(); toast("グループから抜けました");
+      if(id===gid){
+        gid=null; LS.del("omoide.gid");
+        const next = Object.keys(myGroups).find(x=>x!==id);
+        if(next) enterGroup(next).catch(()=>showGroupScreen()); else showGroupScreen();
+      }
+    }catch(e){ toast(errMsg(e)); $("#lYes").disabled=false; }
+  };
+}
+
 // ---------- 現在地の共有(アプリを開いている間だけ更新) ----------
 let locs = {}, friendMarkers = [], lastSent = { t:0, lat:0, lng:0 };
 const shareMode = () => LS.get("omoide.share") || "off";   // "off" | "on" | "fuzzy"
+async function clearMyLocs(){ await Promise.all(allGroupIds().map(g=>deleteDoc(doc(db,"groups",g,"locs",me.uid)).catch(()=>{}))); }
 async function sendLoc(force){
   if(!gid || !me || !myPos) return;
   const mode = shareMode(); if(mode==="off") return;
@@ -456,7 +519,8 @@ async function sendLoc(force){
   let lat = myPos[0], lng = myPos[1];
   if(mode==="fuzzy"){ lat = Math.round(lat/0.005)*0.005; lng = Math.round(lng/0.006)*0.006; } // 約500m単位にぼかす
   lastSent = { t:now, lat:myPos[0], lng:myPos[1] };
-  try{ await setDoc(doc(db,"groups",gid,"locs",me.uid), { lat, lng, fuzzy: mode==="fuzzy", updatedAt: now }); }catch(_){}
+  const body = { lat, lng, fuzzy: mode==="fuzzy", updatedAt: now };
+  await Promise.all(allGroupIds().map(g=>setDoc(doc(db,"groups",g,"locs",me.uid), body).catch(()=>{})));   // 参加している全部のグループに送る
 }
 function agoText(t){
   const m = Math.floor((Date.now()-t)/60000);
@@ -510,7 +574,7 @@ function renderChips(){
   const items=[{k:"all",label:"すべて",emoji:"✨"}].concat(GENRES.filter(g=>cnt[g.k]));
   $("#chips").innerHTML = items.length>2 || filter!=="all" ? items.map(g=>`<button class="chip ${filter===g.k?"on":""}" data-k="${g.k}">${g.emoji} ${esc(g.label)}</button>`).join("") : "";
 }
-$("#pill").onclick = ()=>{ const pts=visible().filter(s=>typeof s.lat==="number"); if(pts.length) fitTo(pts); };
+$("#pill").onclick = ()=>openGroupSheet();
 $("#chips").addEventListener("click", e=>{ const b=e.target.closest(".chip"); if(!b) return; filter=b.dataset.k; renderAll(); });
 function markerEl(s){
   const g = G[s.genre]||G.other;
@@ -755,15 +819,15 @@ $("#bSettings").onclick = ()=>{
     <div class="tabs2" id="shareSeg" style="margin-top:0">
       <button data-v="off">共有しない</button><button data-v="on">共有する</button><button data-v="fuzzy">あいまい</button>
     </div>
-    <div class="hint">グループのメンバーだけに見えます。アプリを開いている間だけ更新され、閉じると最後の場所が「〇分前」付きで残ります。「あいまい」は約500m単位のだいたいの場所になります。</div>
+    <div class="hint">参加しているすべてのグループのメンバーに見えます。アプリを開いている間だけ更新され、閉じると最後の場所が「〇分前」付きで残ります。「あいまい」は約500m単位のだいたいの場所になります。</div>
     <div class="meta" style="margin-top:16px">ログイン中：${esc(me.displayName||"")}<br>グループ：${esc(gname)}</div>
     <div class="row"><button class="btn s" id="sSwitch">グループを切り替える</button></div>
     <div class="row"><button class="btn s" id="sOut">ログアウト</button></div>
     <p class="hint" style="margin-top:16px">地図：© OpenStreetMap contributors © OpenFreeMap</p>
     <div class="row"><button class="btn s" id="sClose">閉じる</button></div>`);
   $("#sClose").onclick=closeSheet;
-  $("#sSwitch").onclick=()=>{ closeSheet(); LS.del("omoide.gid"); gid=null; showGroupScreen(); };
-  $("#sOut").onclick=async ()=>{ closeSheet(); try{ await deleteDoc(doc(db,"groups",gid,"locs",me.uid)); }catch(_){} LS.del("omoide.gid"); LS.del("omoide.icon"); LS.del("omoide.share"); signOut(auth); };
+  $("#sSwitch").onclick=()=>openGroupSheet();
+  $("#sOut").onclick=async ()=>{ closeSheet(); await clearMyLocs(); LS.del("omoide.gid"); LS.del("omoide.icon"); LS.del("omoide.share"); signOut(auth); };
 
   const markShare = ()=>[...$("#shareSeg").children].forEach(b=>b.classList.toggle("on", b.dataset.v===shareMode()));
   markShare();
@@ -771,7 +835,7 @@ $("#bSettings").onclick = ()=>{
     const b = e.target.closest("button"); if(!b) return;
     LS.set("omoide.share", b.dataset.v); markShare();
     if(b.dataset.v==="off"){
-      try{ await deleteDoc(doc(db,"groups",gid,"locs",me.uid)); }catch(_){}
+      await clearMyLocs();
       toast("現在地の共有をやめました");
     } else {
       lastSent = { t:0, lat:0, lng:0 };
@@ -782,6 +846,7 @@ $("#bSettings").onclick = ()=>{
   const saveIcon = async (ic)=>{
     try{
       await setDoc(doc(db,"groups",gid,"members",me.uid), { icon: ic }, { merge:true });
+      await Promise.all(Object.keys(myGroups).filter(g=>g!==gid).map(g=>setDoc(doc(db,"groups",g,"members",me.uid), { icon: ic }, { merge:true }).catch(()=>{})));
       LS.set("omoide.icon", JSON.stringify(ic));
       $("#icPrev").innerHTML = avatarHTML(myself(),72);
       drawMe(); toast("アイコンを変更しました");
