@@ -1,6 +1,6 @@
 {
-  "name": "ashiart",
-  "short_name": "ashiart",
+  "name": "AshiArt",
+  "short_name": "AshiArt",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
