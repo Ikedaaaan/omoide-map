@@ -1308,24 +1308,33 @@ async function showLetterBody(id, head, openersHTML){
 }
 
 // ---------- 👥 合流ショット(友達と近くにいるときに一緒に1枚) ----------
-const MEET_M = 100, MEET_FRESH = 10*60*1000, MEET_SNOOZE = 3*3600*1000;
-let meets = {}, meetMarkers = [], meetNearby = [];
+const MEET_M = 100, MEET_FRESH = 10*60*1000, MEET_PER_DAY = 2, MEET_GAP = 3600*1000;
+let meets = {}, meetMarkers = [], meetNearby = [], meetShowing = [];
 function meetSeen(){ try{ return JSON.parse(LS.get("omoide.meetseen")||"{}"); }catch(_){ return {}; } }
-function markMeetSeen(uids){ const m = meetSeen(); uids.forEach(u=>m[u]=Date.now()); LS.set("omoide.meetseen", JSON.stringify(m)); }
-// 位置共有中の友達が100m以内・10分以内に更新していたら声をかける(同じ人には3時間に1回まで)
+// 位置共有中の友達が100m以内・10分以内に更新していたら声をかける(同じ人とは1日2回まで・前回から1時間あける)
 function checkMeet(){
   const bar = $("#meetBar"); if(!bar) return;
-  if(!me || !gid || !myPos){ bar.classList.remove("show"); return; }
-  const seen = meetSeen(), now = Date.now();
+  if(!me || !gid || !myPos){ bar.classList.remove("show"); meetShowing = []; return; }
+  const now = Date.now();
   meetNearby = Object.entries(locs).filter(([u,L])=>u!==me.uid && !L.fuzzy && typeof L.lat==="number" && now-(L.updatedAt||0) < MEET_FRESH
     && distM({lat:myPos[0],lng:myPos[1]}, {lat:L.lat,lng:L.lng}) <= MEET_M).map(([u])=>u);
-  const fresh = meetNearby.filter(u=>!(seen[u] && now-seen[u] < MEET_SNOOZE));
+  if(meetShowing.length){   // 表示中は、近くにいる間はそのまま
+    meetShowing = meetShowing.filter(u=>meetNearby.includes(u));
+    if(!meetShowing.length) bar.classList.remove("show");
+    return;
+  }
+  const today = jstDate(), seen = meetSeen();
+  const ok = u=>{ const r = seen[u]; return !r || typeof r!=="object" || r.d!==today || (r.n < MEET_PER_DAY && now - r.t >= MEET_GAP); };
+  const fresh = meetNearby.filter(ok);
   if(!fresh.length){ bar.classList.remove("show"); return; }
+  fresh.forEach(u=>{ const r = seen[u]; seen[u] = (r && typeof r==="object" && r.d===today) ? { d:today, n:r.n+1, t:now } : { d:today, n:1, t:now }; });
+  LS.set("omoide.meetseen", JSON.stringify(seen));
+  meetShowing = fresh;
   $("#meetText").textContent = `👥 ${fresh.map(u=>who(u)).slice(0,3).join("さん、")}さん${fresh.length>3?"たち":""}が近くにいるよ！一緒に1枚撮ろう`;
   bar.classList.add("show");
 }
-$("#meetX").onclick = ()=>{ markMeetSeen(meetNearby); $("#meetBar").classList.remove("show"); };
-$("#meetShoot").onclick = ()=>{ markMeetSeen(meetNearby); $("#meetBar").classList.remove("show"); openMeetCapture(meetNearby); };
+$("#meetX").onclick = ()=>{ meetShowing = []; $("#meetBar").classList.remove("show"); };
+$("#meetShoot").onclick = ()=>{ meetShowing = []; $("#meetBar").classList.remove("show"); openMeetCapture(meetNearby); };
 setInterval(checkMeet, 30000);
 
 function openMeetCapture(pre){
