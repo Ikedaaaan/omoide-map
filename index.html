@@ -48,10 +48,17 @@
   .mk-label{position:absolute;top:56px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:12px;font-weight:800;color:var(--ink);
     text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;max-width:140px;overflow:hidden;text-overflow:ellipsis}
   .far .mk-label{display:none}
-  .me{position:relative;width:46px;height:46px}
-  .me .ring{position:absolute;inset:-4px;border-radius:50%;background:rgba(47,123,255,.35);animation:mepulse 2s ease-out infinite}
-  .me .avatar{position:absolute;inset:0;border:3px solid #2f7bff;box-shadow:0 2px 8px rgba(0,0,0,.3)}
-  @keyframes mepulse{0%{transform:scale(.9);opacity:.9}100%{transform:scale(1.7);opacity:0}}
+  /* 現在地(whoo風：角丸アイコンの吹き出し＋向きの扇形) */
+  .mepin{display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));animation:mepop .35s ease-out}
+  .mepic{width:72px;height:72px;border-radius:24px;border:4px solid #2f7bff;background:#fff;overflow:hidden;box-sizing:border-box}
+  .mepic .avatar{width:100%!important;height:100%!important;border-radius:0!important}
+  .metail{width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;border-top:13px solid #2f7bff;margin-top:-2px}
+  .mebase{position:relative;width:200px;height:200px;pointer-events:none}
+  .mecone{position:absolute;inset:0;border-radius:50%;display:none;
+    background:conic-gradient(from -32deg, rgba(47,123,255,.45) 0deg 64deg, transparent 64deg 360deg);
+    -webkit-mask-image:radial-gradient(circle, #000 0%, rgba(0,0,0,.6) 35%, transparent 70%);mask-image:radial-gradient(circle, #000 0%, rgba(0,0,0,.6) 35%, transparent 70%)}
+  .medot{position:absolute;left:50%;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:#2f7bff;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3)}
+  @keyframes mepop{0%{transform:scale(.6);opacity:0}100%{transform:scale(1);opacity:1}}
   .avatar{border-radius:50%;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;flex:none;background:#f3ebe2;box-sizing:border-box;vertical-align:middle;line-height:1}
   .avatar img{width:100%;height:100%;object-fit:cover;display:block}
   .mk-who{position:absolute;left:-6px;top:-6px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3);display:flex}
@@ -264,7 +271,7 @@ function startLocate(pan){
     watchId = navigator.geolocation.watchPosition(p=>{
       myPos = [p.coords.latitude, p.coords.longitude];
       if(!meMarker) drawMe();
-      else meMarker.setLngLat([myPos[1], myPos[0]]);
+      else moveMe();
       if(pendingPan){ setView(myPos, Math.max(map.getZoom(),16)); pendingPan=false; }
     }, err=>{ toast(err.code===1 ? "位置情報の利用が許可されていません(ブラウザの設定を確認してね)" : "現在地を取得できませんでした"); pendingPan=false; },
     { enableHighAccuracy:true, maximumAge:15000, timeout:20000 });
@@ -272,14 +279,48 @@ function startLocate(pan){
   if(pan){ if(myPos){ setView(myPos, Math.max(map.getZoom(),16)); } else { pendingPan=true; } }
 }
 let pendingPan = false;
+let meBase = null, heading = null;
 function drawMe(){ // 現在地を自分のアイコンで表示(位置はこの端末の中だけで使い、送信しない)
   if(!myPos) return;
   if(meMarker){ meMarker.remove(); meMarker=null; }
-  const el=document.createElement("div"); el.className="me";
-  el.innerHTML = `<div class="ring"></div>${avatarHTML(myself(), 46)}`;
-  meMarker = new maplibregl.Marker({ element: el }).setLngLat([myPos[1], myPos[0]]).addTo(map);
+  if(meBase){ meBase.remove(); meBase=null; }
+  const ll = [myPos[1], myPos[0]];
+  const base=document.createElement("div"); base.className="mebase";
+  base.innerHTML = `<div class="mecone"></div><div class="medot"></div>`;
+  meBase = new maplibregl.Marker({ element: base, rotationAlignment:"map", pitchAlignment:"map" }).setLngLat(ll).addTo(map);
+  const el=document.createElement("div"); el.className="mepin";
+  el.innerHTML = `<div class="mepic">${avatarHTML(myself(), 64)}</div><div class="metail"></div>`;
+  meMarker = new maplibregl.Marker({ element: el, anchor:"bottom", offset:[0,-6] }).setLngLat(ll).addTo(map);
+  applyHeading();
 }
-$("#bLocate").onclick = ()=>startLocate(true);
+function moveMe(){ const ll=[myPos[1], myPos[0]]; if(meMarker) meMarker.setLngLat(ll); if(meBase) meBase.setLngLat(ll); }
+function applyHeading(){
+  if(!meBase) return;
+  const cone = meBase.getElement().querySelector(".mecone");
+  if(heading==null){ cone.style.display="none"; return; }
+  cone.style.display="block"; meBase.setRotation(heading);
+}
+// スマホの向き(コンパス)。iPhoneは許可が必要なので、◎を押したときに聞く
+let orientOn = false;
+function onOrient(e){
+  let h = null;
+  if(typeof e.webkitCompassHeading==="number") h = e.webkitCompassHeading;
+  else if(e.absolute && typeof e.alpha==="number") h = 360 - e.alpha;
+  if(h==null) return;
+  heading = Math.round(h); applyHeading();
+}
+async function startOrientation(){
+  if(orientOn) return;
+  try{
+    if(typeof DeviceOrientationEvent!=="undefined" && typeof DeviceOrientationEvent.requestPermission==="function"){
+      const r = await DeviceOrientationEvent.requestPermission(); if(r!=="granted") return;
+    }
+    window.addEventListener("deviceorientationabsolute", onOrient);
+    window.addEventListener("deviceorientation", onOrient);
+    orientOn = true;
+  }catch(_){}
+}
+$("#bLocate").onclick = ()=>{ startOrientation(); startLocate(true); };
 
 // ---------- 状態 ----------
 let app, auth, db, me = null;
@@ -379,6 +420,7 @@ async function enterGroup(id){
   gid = id; gname = snap.data().name || "おもいでマップ"; gcode = LS.get("omoide.code."+id) || "";
   LS.set("omoide.gid", id);
   hideScreen(); setMainUI(true); startListening();
+  try{ const st = await navigator.permissions.query({ name:"geolocation" }); if(st.state==="granted") startLocate(false); }catch(_){}
 }
 function stopListening(){ unsubs.forEach(f=>{try{f()}catch(_){}}); unsubs=[]; spots=[]; members={}; clearMarkers(); }
 function clearMarkers(){ markerObjs.forEach(m=>m.remove()); markerObjs=[]; }
@@ -487,7 +529,7 @@ function startPick(cb, at){
 }
 function endPick(){ $("#pick").style.display="none"; setMainUI(true); }
 $("#pCancel").onclick = ()=>{ const cb=pickCb; pickCb=null; endPick(); if(cb) cb(null); };
-$("#pHere").onclick = ()=>startLocate(true);
+$("#pHere").onclick = ()=>{ startOrientation(); startLocate(true); };
 $("#pOk").onclick = ()=>{ const c=map.getCenter(); const cb=pickCb; pickCb=null; endPick(); if(cb) cb({lat:c.lat, lng:c.lng}); };
 $("#bAdd").onclick = ()=>startPick(pos=>{ if(pos) openForm(null, pos); });
 
