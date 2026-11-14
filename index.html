@@ -639,9 +639,18 @@ function startListening(){
     locs = {}; snap.docs.forEach(d=>locs[d.id]=d.data());
     drawFriends();
   }, e=>{}));
+  let realsFirst = true;
   unsubs.push(onSnapshot(collection(db,"groups",gid,"reals"), snap=>{
+    const before = reals;
     reals = {}; snap.docs.forEach(d=>reals[d.id]={ id:d.id, ...d.data() });
     drawReals(); updateRealUI();
+    // 友達の新しい投稿をお知らせ & 開いている画面をその場で更新
+    if(!realsFirst){
+      const fresh = Object.values(reals).filter(r=>!before[r.id] && me && r.uid!==me.uid && r.date===jstDate());
+      if(fresh.length) toast(`⚡ ${who(fresh[0].uid)}さん${fresh.length>1?`たち(${fresh.length}人)`:""}がおもいでタイムを投稿しました`);
+      refreshRealSheet();
+    }
+    realsFirst = false;
   }, e=>{}));
 }
 
@@ -1067,7 +1076,20 @@ function realCardHTML(r, img){
     ${r.caption && !hidden ? `<div class="hint" style="font-size:14px;color:var(--ink)">${esc(r.caption)}</div>` : ""}
   </div>`;
 }
-async function loadRealImg(id){ try{ const s = await getDoc(doc(db,"groups",gid,"realimg",id)); return s.exists() ? s.data() : null; }catch(_){ return null; } }
+const realImgCache = {};
+async function loadRealImg(id){
+  const key = gid + "/" + id; if(realImgCache[key]) return realImgCache[key];
+  try{ const s = await getDoc(doc(db,"groups",gid,"realimg",id)); if(!s.exists()) return null; realImgCache[key] = s.data(); return s.data(); }catch(_){ return null; }
+}
+// 投稿が増えた・消えたときに、開いている「今日」「これまで」を作り直す(スクロール位置はそのまま)
+function refreshRealSheet(){
+  const sh = $("#sheet"); if(!sh || !$("#ov").classList.contains("show")) return;
+  const y = sh.scrollTop;
+  if($("#fList")) openRealFeed();
+  else if(realTab==="history" && $(".rgrid, .rtabs") && !$("#rOne")) openRealHistory();
+  else return;
+  sh.scrollTop = y;
+}
 function bindSwap(root){ root.querySelectorAll(".rl-img").forEach(box=>box.addEventListener("click", ()=>{ if(box.classList.contains("blur")) return; const b=box.querySelector(".bk"), f=box.querySelector(".fr"); if(b&&f){ const t=b.src; b.src=f.src; f.src=t; } })); }
 
 let realTab = "today";
@@ -1094,14 +1116,14 @@ async function openRealFeed(){
   realTab = "today";
   openSheet(`<h2>⚡ おもいでタイム</h2>
     <div class="rtabs"><button class="on">今日</button><button id="tHist">これまで</button></div>${head}
-    <div id="fList">${today.length ? today.map(r=>realCardHTML(r, null)).join("") : `<p class="hint">まだ誰も投稿していません</p>`}</div>
+    <div id="fList">${today.length ? today.map(r=>realCardHTML(r, realHidden(r) ? null : (realImgCache[gid+"/"+r.id]||null))).join("") : `<p class="hint">まだ誰も投稿していません</p>`}</div>
     <div class="row"><button class="btn s" id="fClose">閉じる</button></div>`);
   $("#fClose").onclick = closeSheet;
   $("#tHist").onclick = openRealHistory;
   if($("#fShoot")) $("#fShoot").onclick = openRealCapture;
   // 大きい写真はあとから読み込む(ぼかし中のものは読み込まない)
   for(const r of today){
-    if(realHidden(r)) continue;
+    if(realHidden(r) || realImgCache[gid+"/"+r.id]) continue;
     const img = await loadRealImg(r.id); if(!img) continue;
     const box = $("#fList") && $("#fList").querySelector(`.rl-img[data-id="${CSS.escape(r.id)}"]`);
     if(box){ box.innerHTML = `<img class="bk" src="${esc(img.back)}" alt="">${img.front?`<img class="fr" src="${esc(img.front)}" alt="">`:""}`; }
