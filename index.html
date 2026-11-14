@@ -53,6 +53,14 @@
   .mepic{width:72px;height:72px;border-radius:24px;border:4px solid #2f7bff;background:#fff;overflow:hidden;box-sizing:border-box}
   .mepic .avatar{width:100%!important;height:100%!important;border-radius:0!important}
   .metail{width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;border-top:13px solid #2f7bff;margin-top:-2px}
+  /* 友達の現在地(白い縁) */
+  .frpin-in{display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 4px 8px rgba(0,0,0,.3));cursor:pointer}
+  .frpic{width:62px;height:62px;border-radius:21px;border:4px solid #fff;background:#fff;overflow:hidden;box-sizing:border-box}
+  .frpic .avatar{width:100%!important;height:100%!important;border-radius:0!important}
+  .frtail{width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-top:12px solid #fff;margin-top:-2px}
+  .frago{margin-top:3px;background:#fff;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:800;color:var(--ink);white-space:nowrap}
+  .frpin-in.old{opacity:.6}
+  .frpin-in.fuzzy .frpic{border-style:dashed}
   .mebase{position:relative;width:200px;height:200px;pointer-events:none}
   .mecone{position:absolute;inset:0;border-radius:50%;display:none;
     background:conic-gradient(from -35deg, rgba(47,123,255,.7) 0deg 70deg, transparent 70deg 360deg);
@@ -273,6 +281,7 @@ function startLocate(pan){
       myPos = [p.coords.latitude, p.coords.longitude];
       if(!meMarker) drawMe();
       else moveMe();
+      sendLoc(false);
       if(pendingPan){ setView(myPos, Math.max(map.getZoom(),16)); pendingPan=false; }
     }, err=>{ toast(err.code===1 ? "位置情報の利用が許可されていません(ブラウザの設定を確認してね)" : "現在地を取得できませんでした"); pendingPan=false; },
     { enableHighAccuracy:true, maximumAge:15000, timeout:20000 });
@@ -431,9 +440,45 @@ async function enterGroup(id){
   gid = id; gname = snap.data().name || "おもいでマップ"; gcode = LS.get("omoide.code."+id) || "";
   LS.set("omoide.gid", id);
   hideScreen(); setMainUI(true); startListening();
-  try{ const st = await navigator.permissions.query({ name:"geolocation" }); if(st.state==="granted") startLocate(false); }catch(_){}
+  lastSent = { t:0, lat:0, lng:0 };
+  if(shareMode()!=="off"){ startLocate(false); sendLoc(true); }
+  else { try{ const st = await navigator.permissions.query({ name:"geolocation" }); if(st.state==="granted") startLocate(false); }catch(_){} }
 }
-function stopListening(){ unsubs.forEach(f=>{try{f()}catch(_){}}); unsubs=[]; spots=[]; members={}; clearMarkers(); }
+// ---------- 現在地の共有(アプリを開いている間だけ更新) ----------
+let locs = {}, friendMarkers = [], lastSent = { t:0, lat:0, lng:0 };
+const shareMode = () => LS.get("omoide.share") || "off";   // "off" | "on" | "fuzzy"
+async function sendLoc(force){
+  if(!gid || !me || !myPos) return;
+  const mode = shareMode(); if(mode==="off") return;
+  const now = Date.now();
+  const moved = lastSent.t ? distM({lat:myPos[0],lng:myPos[1]}, {lat:lastSent.lat,lng:lastSent.lng}) : 1e9;
+  if(!force && now-lastSent.t < 60000 && moved < 30) return;   // 1分に1回まで(30m以上動いたら即送る)
+  let lat = myPos[0], lng = myPos[1];
+  if(mode==="fuzzy"){ lat = Math.round(lat/0.005)*0.005; lng = Math.round(lng/0.006)*0.006; } // 約500m単位にぼかす
+  lastSent = { t:now, lat:myPos[0], lng:myPos[1] };
+  try{ await setDoc(doc(db,"groups",gid,"locs",me.uid), { lat, lng, fuzzy: mode==="fuzzy", updatedAt: now }); }catch(_){}
+}
+function agoText(t){
+  const m = Math.floor((Date.now()-t)/60000);
+  if(m < 1) return "いま"; if(m < 60) return m+"分前";
+  const h = Math.floor(m/60); return h < 24 ? h+"時間前" : "1日以上前";
+}
+function drawFriends(){
+  friendMarkers.forEach(m=>m.remove()); friendMarkers = [];
+  if(!me) return;
+  for(const [id, L] of Object.entries(locs)){
+    if(id===me.uid || typeof L.lat!=="number" || typeof L.lng!=="number") continue;
+    if(Date.now() - (L.updatedAt||0) > 24*3600*1000) continue;   // 1日以上前の位置は出さない
+    const old = Date.now() - (L.updatedAt||0) > 3600*1000;
+    const el = document.createElement("div");
+    el.innerHTML = `<div class="frpin-in${old?" old":""}${L.fuzzy?" fuzzy":""}"><div class="frpic">${avatarHTML(members[id], 54)}</div><div class="frtail"></div><div class="frago">${agoText(L.updatedAt)}${L.fuzzy?"・あいまい":""}</div></div>`;
+    el.addEventListener("click", e=>{ e.stopPropagation(); toast(`${who(id)}：${agoText(L.updatedAt)}${L.fuzzy?"(だいたいの場所)":""}`); });
+    friendMarkers.push(new maplibregl.Marker({ element: el, anchor:"bottom", offset:[0, 16] }).setLngLat([L.lng, L.lat]).addTo(map));
+  }
+}
+setInterval(drawFriends, 60000);
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) sendLoc(true); });
+function stopListening(){ unsubs.forEach(f=>{try{f()}catch(_){}}); unsubs=[]; spots=[]; members={}; locs={}; clearMarkers(); drawFriends(); }
 function clearMarkers(){ markerObjs.forEach(m=>m.remove()); markerObjs=[]; }
 let firstFit = true;
 function startListening(){
@@ -446,7 +491,11 @@ function startListening(){
     members = {}; snap.docs.forEach(d=>members[d.id]=d.data());
     const mine = members[me.uid];
     if(mine && mine.icon && !myIconLS()) LS.set("omoide.icon", JSON.stringify(mine.icon)); // 別の端末で設定したアイコンを引き継ぐ
-    renderAll(); drawMe();
+    renderAll(); drawMe(); drawFriends();
+  }, e=>{}));
+  unsubs.push(onSnapshot(collection(db,"groups",gid,"locs"), snap=>{
+    locs = {}; snap.docs.forEach(d=>locs[d.id]=d.data());
+    drawFriends();
   }, e=>{}));
 }
 
@@ -702,6 +751,11 @@ $("#bSettings").onclick = ()=>{
       <div class="icgrid" id="icColors">${ICON_COLORS.map(c=>`<button type="button" data-c="${c}" style="background:${c}" aria-label="色 ${c}"></button>`).join("")}</div>
       <div class="row"><button class="btn p" id="icEmojiOk">この絵文字にする</button></div>
     </div>
+    <label class="f">現在地の共有</label>
+    <div class="tabs2" id="shareSeg" style="margin-top:0">
+      <button data-v="off">共有しない</button><button data-v="on">共有する</button><button data-v="fuzzy">あいまい</button>
+    </div>
+    <div class="hint">グループのメンバーだけに見えます。アプリを開いている間だけ更新され、閉じると最後の場所が「〇分前」付きで残ります。「あいまい」は約500m単位のだいたいの場所になります。</div>
     <div class="meta" style="margin-top:16px">ログイン中：${esc(me.displayName||"")}<br>グループ：${esc(gname)}</div>
     <div class="row"><button class="btn s" id="sSwitch">グループを切り替える</button></div>
     <div class="row"><button class="btn s" id="sOut">ログアウト</button></div>
@@ -709,8 +763,22 @@ $("#bSettings").onclick = ()=>{
     <div class="row"><button class="btn s" id="sClose">閉じる</button></div>`);
   $("#sClose").onclick=closeSheet;
   $("#sSwitch").onclick=()=>{ closeSheet(); LS.del("omoide.gid"); gid=null; showGroupScreen(); };
-  $("#sOut").onclick=()=>{ closeSheet(); LS.del("omoide.gid"); LS.del("omoide.icon"); signOut(auth); };
+  $("#sOut").onclick=async ()=>{ closeSheet(); try{ await deleteDoc(doc(db,"groups",gid,"locs",me.uid)); }catch(_){} LS.del("omoide.gid"); LS.del("omoide.icon"); LS.del("omoide.share"); signOut(auth); };
 
+  const markShare = ()=>[...$("#shareSeg").children].forEach(b=>b.classList.toggle("on", b.dataset.v===shareMode()));
+  markShare();
+  $("#shareSeg").onclick = async e=>{
+    const b = e.target.closest("button"); if(!b) return;
+    LS.set("omoide.share", b.dataset.v); markShare();
+    if(b.dataset.v==="off"){
+      try{ await deleteDoc(doc(db,"groups",gid,"locs",me.uid)); }catch(_){}
+      toast("現在地の共有をやめました");
+    } else {
+      lastSent = { t:0, lat:0, lng:0 };
+      startLocate(false); sendLoc(true);
+      toast(b.dataset.v==="fuzzy" ? "だいたいの場所を共有します" : "現在地を共有します");
+    }
+  };
   const saveIcon = async (ic)=>{
     try{
       await setDoc(doc(db,"groups",gid,"members",me.uid), { icon: ic }, { merge:true });
