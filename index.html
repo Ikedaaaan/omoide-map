@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ff6b4a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>おもいでマップ</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root{ --accent:#ff6b4a; --accent2:#ffb03b; --ink:#1f1a17; --sub:#7a6e66; --line:#eee3d8; --bg:#fff8f0; --ok:#2bb673;
+    --st:env(safe-area-inset-top,0px); --sb:env(safe-area-inset-bottom,0px); }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden;color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP","Yu Gothic UI",sans-serif}
+  #map{position:fixed;inset:0;background:#f2efe9}
+  button{font-family:inherit}
+
+  /* 上部 */
+  .top{position:fixed;left:0;right:0;top:calc(var(--st) + 10px);z-index:500;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none}
+  .pill{pointer-events:auto;background:rgba(255,255,255,.95);border-radius:999px;padding:9px 18px;font-weight:800;font-size:15px;
+    box-shadow:0 3px 14px rgba(0,0,0,.14);border:none;color:var(--ink);max-width:80vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pill small{font-weight:600;color:var(--sub);margin-left:6px}
+  .chips{pointer-events:auto;display:flex;gap:6px;overflow-x:auto;max-width:100vw;padding:0 12px;scrollbar-width:none}
+  .chips::-webkit-scrollbar{display:none}
+  .chip{flex:none;padding:6px 11px;border-radius:999px;border:none;background:rgba(255,255,255,.95);font-size:13px;font-weight:700;
+    box-shadow:0 2px 8px rgba(0,0,0,.1);color:var(--ink)}
+  .chip.on{background:var(--ink);color:#fff}
+
+  /* 右側ボタン */
+  .side{position:fixed;right:12px;top:calc(var(--st) + 110px);z-index:500;display:flex;flex-direction:column;gap:10px}
+  .sbtn{width:46px;height:46px;border-radius:14px;border:none;background:#fff;box-shadow:0 3px 12px rgba(0,0,0,.16);font-size:21px}
+
+  /* 下部ボタン */
+  .bottom{position:fixed;left:0;right:0;bottom:calc(var(--sb) + 18px);z-index:500;display:flex;justify-content:center;gap:16px;align-items:center}
+  .bbtn{width:64px;height:64px;border-radius:18px;border:none;background:#111;color:#fff;font-size:26px;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+  .bbtn.add{width:76px;height:76px;border-radius:24px;background:linear-gradient(135deg,#ff6b4a,#ffb03b);font-size:36px;font-weight:800}
+
+  /* ピン */
+  .mk{position:relative;width:52px;height:60px}
+  .mk-in{position:absolute;left:3px;top:0;width:46px;height:46px;border-radius:50%;background:var(--c);border:3px solid #fff;
+    box-shadow:0 3px 10px rgba(0,0,0,.3);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:22px}
+  .mk-in img{width:100%;height:100%;object-fit:cover}
+  .mk-tail{position:absolute;left:21px;top:42px;width:10px;height:10px;background:#fff;transform:rotate(45deg);box-shadow:2px 2px 4px rgba(0,0,0,.2)}
+  .mk-badge{position:absolute;right:-2px;top:-4px;width:22px;height:22px;border-radius:50%;background:#fff;font-size:13px;
+    display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+  .mk-label{position:absolute;top:56px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:12px;font-weight:800;color:var(--ink);
+    text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;max-width:140px;overflow:hidden;text-overflow:ellipsis}
+  .far .mk-label{display:none}
+  .me{width:20px;height:20px;border-radius:50%;background:#2f7bff;border:3px solid #fff;box-shadow:0 0 0 6px rgba(47,123,255,.25)}
+  .leaflet-div-icon{background:none;border:none}
+
+  /* 位置決めモード */
+  #pick{position:fixed;inset:0;z-index:600;pointer-events:none;display:none}
+  #pick .cross{position:absolute;left:50%;top:50%;transform:translate(-50%,-100%);font-size:44px;filter:drop-shadow(0 3px 4px rgba(0,0,0,.3))}
+  #pick .msg{position:absolute;left:12px;right:12px;top:calc(var(--st) + 12px);background:#111;color:#fff;border-radius:14px;padding:12px;
+    font-size:14px;text-align:center;line-height:1.5}
+  #pick .acts{position:absolute;left:12px;right:12px;bottom:calc(var(--sb) + 20px);display:flex;gap:10px;pointer-events:auto}
+
+  /* シート */
+  .ov{position:fixed;inset:0;z-index:900;background:rgba(20,12,6,.45);display:none;align-items:flex-end;justify-content:center}
+  .ov.show{display:flex}
+  .sheet{background:#fff;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;border-radius:22px 22px 0 0;padding:16px 16px calc(var(--sb) + 24px)}
+  .sheet h2{margin:2px 0 12px;font-size:19px}
+  label.f{display:block;font-size:13px;font-weight:800;margin:14px 0 6px}
+  input[type=text],input[type=date],input[type=search],input[type=password],textarea{width:100%;padding:11px;border-radius:12px;border:1px solid var(--line);
+    font-size:16px;font-family:inherit;background:#fffdfb}
+  .hint{font-size:12.5px;color:var(--sub);margin-top:5px;line-height:1.6}
+  .hint.ok{color:var(--ok)} .hint.ng{color:#d9443a}
+  .genres{display:flex;flex-wrap:wrap;gap:6px}
+  .genres button{padding:7px 11px;border-radius:999px;border:1px solid var(--line);background:#fff;font-size:14px;color:var(--ink)}
+  .genres button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .rate button{font-size:30px;background:none;border:none;color:#e6dbcf;padding:0 2px}
+  .rate button.on{color:var(--accent2)}
+  .row{display:flex;gap:8px;margin-top:18px}
+  .btn{flex:1;padding:13px;border-radius:14px;border:none;font-size:15px;font-weight:800;cursor:pointer}
+  .btn.p{background:var(--accent);color:#fff} .btn.s{background:#f3ebe2;color:var(--ink)} .btn.d{background:#fde6e3;color:#c8372d}
+  .btn.k{background:#111;color:#fff}
+  .btn:disabled{opacity:.5}
+  .photo{width:100%;max-height:340px;object-fit:cover;border-radius:16px;background:#f3ebe2;display:block}
+  .meta{font-size:13px;color:var(--sub);margin:6px 0;line-height:1.7}
+  .stars{color:var(--accent2);letter-spacing:1px}
+  .note{white-space:pre-wrap;font-size:15px;line-height:1.7;background:var(--bg);border-radius:12px;padding:10px;margin-top:8px}
+  a.gm{display:block;text-align:center;margin-top:12px;padding:12px;border-radius:14px;background:#e8f4ff;color:#1a6fd1;font-weight:800;text-decoration:none}
+  .item{display:flex;gap:10px;background:#fff;border-radius:16px;padding:10px;margin-bottom:10px;box-shadow:0 1px 5px rgba(80,40,0,.1);
+    border:none;width:100%;text-align:left;color:var(--ink);font:inherit}
+  .thumb{width:64px;height:64px;border-radius:12px;flex:none;object-fit:cover;display:flex;align-items:center;justify-content:center;font-size:28px}
+  .item .t{font-weight:800;font-size:15px} .item .m{font-size:12px;color:var(--sub);margin-top:3px}
+  .pv{margin-top:8px;max-width:100%;max-height:170px;border-radius:12px;display:none}
+  .member{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+  .member img,.member .av{width:36px;height:36px;border-radius:50%;background:#f3ebe2;display:flex;align-items:center;justify-content:center;object-fit:cover}
+
+  /* 全画面(ログイン・グループ) */
+  .screen{position:fixed;inset:0;z-index:1000;background:linear-gradient(160deg,#ff6b4a,#ffb03b);display:none;align-items:center;justify-content:center;padding:24px}
+  .screen.show{display:flex}
+  .card{background:#fff;border-radius:24px;padding:24px 20px;width:100%;max-width:400px;box-shadow:0 10px 30px rgba(0,0,0,.2)}
+  .card h1{margin:0 0 6px;font-size:24px} .card p{color:var(--sub);font-size:14px;line-height:1.7;margin:6px 0 0}
+  .tabs2{display:flex;gap:6px;margin:16px 0 4px}
+  .tabs2 button{flex:1;padding:9px;border-radius:999px;border:2px solid var(--accent);background:#fff;color:var(--accent);font-weight:800}
+  .tabs2 button.on{background:var(--accent);color:#fff}
+
+  .toast{position:fixed;left:50%;bottom:calc(var(--sb) + 110px);transform:translateX(-50%);background:#111;color:#fff;padding:11px 16px;
+    border-radius:12px;font-size:14px;z-index:2000;display:none;max-width:90%;text-align:center}
+  .leaflet-control-attribution{font-size:9px}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="top" id="topUI" style="display:none">
+  <button class="pill" id="pill">📍 おもいでマップ</button>
+  <div class="chips" id="chips"></div>
+</div>
+<div class="side" id="sideUI" style="display:none">
+  <button class="sbtn" id="bMembers" title="メンバー・招待">👥</button>
+  <button class="sbtn" id="bSettings" title="設定">⚙️</button>
+</div>
+<div class="bottom" id="bottomUI" style="display:none">
+  <button class="bbtn" id="bList" title="一覧">🔍</button>
+  <button class="bbtn add" id="bAdd" title="記録する">＋</button>
+  <button class="bbtn" id="bLocate" title="現在地">◎</button>
+</div>
+
+<div id="pick">
+  <div class="msg">地図を動かして、📍をお店の場所に合わせてね</div>
+  <div class="cross">📍</div>
+  <div class="acts">
+    <button class="btn s" id="pCancel">やめる</button>
+    <button class="btn k" id="pHere" style="flex:.6">◎ 現在地</button>
+    <button class="btn p" id="pOk">ここにする</button>
+  </div>
+</div>
+
+<div class="ov" id="ov"><div class="sheet" id="sheet"></div></div>
+<div class="screen" id="screen"><div class="card" id="card"></div></div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+/* =========================================================
+   ★ ここに Firebase の設定を貼り付けてください ★
+   (Firebaseコンソール → プロジェクトの設定 → マイアプリ → SDKの設定と構成)
+   ========================================================= */
+const firebaseConfig = {
+  apiKey: "AIzaSyD6BurYw0vgcm3vC-z6QJeKeXTnFlBvT-g",
+  authDomain: "omoide-map-44499.firebaseapp.com",
+  projectId: "omoide-map-44499",
+  storageBucket: "omoide-map-44499.firebasestorage.app",
+  messagingSenderId: "424450812814",
+  appId: "1:424450812814:web:5e41d327cce966184f52df"
+};
+/* ========================================================= */
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, onSnapshot }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// ---------- 定数・小道具 ----------
+const GENRES = [
+  {k:"cafe",label:"カフェ",emoji:"☕",color:"#b07a45"},
+  {k:"ramen",label:"ラーメン",emoji:"🍜",color:"#e8553a"},
+  {k:"meal",label:"ごはん",emoji:"🍚",color:"#2bb673"},
+  {k:"sweets",label:"スイーツ",emoji:"🍰",color:"#ff7eb6"},
+  {k:"izakaya",label:"居酒屋",emoji:"🍺",color:"#f2a516"},
+  {k:"play",label:"あそび",emoji:"🎳",color:"#5b7cfa"},
+  {k:"other",label:"その他",emoji:"📌",color:"#8a7d72"},
+];
+const G = Object.fromEntries(GENRES.map(g=>[g.k,g]));
+const DEFAULT_CENTER = [37.87, 138.95]; // 新潟市西区あたり(初期表示用の目安)
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const starStr = n => "★".repeat(n||0) + "☆".repeat(5-(n||0));
+const todayStr = () => { const d=new Date(), z=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`; };
+const LS = { get:k=>{try{return localStorage.getItem(k)}catch(_){return null}}, set:(k,v)=>{try{localStorage.setItem(k,v)}catch(_){}} , del:k=>{try{localStorage.removeItem(k)}catch(_){}} };
+let toastT;
+function toast(m){ const t=$("#toast"); t.textContent=m; t.style.display="block"; clearTimeout(toastT); toastT=setTimeout(()=>t.style.display="none",3200); }
+function errMsg(e){
+  const c = e && e.code || "";
+  if (c.includes("permission-denied")) return "権限がありません(グループのメンバーか確認してね)";
+  if (c.includes("unavailable")) return "通信できません。電波を確認してね";
+  if (c.includes("popup-closed")) return "ログインがキャンセルされました";
+  return "うまくいきませんでした(" + (c || "不明なエラー") + ")";
+}
+
+// ---------- アプリ内ブラウザ(LINE等)対策 ----------
+const UA = navigator.userAgent;
+const inApp = /Line\/|FBAN|FBAV|Instagram|Twitter|TikTok/i.test(UA);
+
+// ---------- 画面 ----------
+function showScreen(html){ $("#card").innerHTML = html; $("#screen").classList.add("show"); }
+function hideScreen(){ $("#screen").classList.remove("show"); }
+function openSheet(html){ $("#sheet").innerHTML = html; $("#ov").classList.add("show"); $("#sheet").scrollTop = 0; }
+function closeSheet(){ $("#ov").classList.remove("show"); $("#sheet").innerHTML = ""; }
+$("#ov").addEventListener("click", e=>{ if(e.target.id==="ov") closeSheet(); });
+function setMainUI(on){ ["#topUI","#sideUI","#bottomUI"].forEach(s=>$(s).style.display = on ? "" : "none"); }
+
+// ---------- 地図 ----------
+const map = L.map("map", { zoomControl:false, attributionControl:true }).setView(DEFAULT_CENTER, 14);
+L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+  maxZoom: 20, subdomains: "abcd",
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+}).addTo(map);
+const markers = L.layerGroup().addTo(map);
+function updateFar(){ $("#map").classList.toggle("far", map.getZoom() < 15); }
+map.on("zoomend", updateFar); updateFar();
+
+let meMarker = null, myPos = null, watchId = null;
+function startLocate(pan){
+  if(!navigator.geolocation){ toast("この端末では現在地が使えません"); return; }
+  if(watchId===null){
+    watchId = navigator.geolocation.watchPosition(p=>{
+      myPos = [p.coords.latitude, p.coords.longitude];
+      if(!meMarker) meMarker = L.marker(myPos, {icon:L.divIcon({className:"", html:'<div class="me"></div>', iconSize:[20,20], iconAnchor:[10,10]}), interactive:false, zIndexOffset:1000}).addTo(map);
+      else meMarker.setLatLng(myPos);
+      if(pendingPan){ map.setView(myPos, Math.max(map.getZoom(),16)); pendingPan=false; }
+    }, err=>{ toast(err.code===1 ? "位置情報の利用が許可されていません(ブラウザの設定を確認してね)" : "現在地を取得できませんでした"); pendingPan=false; },
+    { enableHighAccuracy:true, maximumAge:15000, timeout:20000 });
+  }
+  if(pan){ if(myPos){ map.setView(myPos, Math.max(map.getZoom(),16)); } else { pendingPan=true; } }
+}
+let pendingPan = false;
+$("#bLocate").onclick = ()=>startLocate(true);
+
+// ---------- 状態 ----------
+let app, auth, db, me = null;
+let gid = null, gname = "", gcode = "";
+let spots = [], members = {};
+let filter = "all";
+let unsubs = [];
+
+// ---------- 起動 ----------
+const configured = !Object.values(firebaseConfig).some(v => String(v).includes("PASTE_HERE"));
+if(!configured){
+  showScreen(`<h1>🔧 設定がまだです</h1><p>index.html の上のほうにある <b>firebaseConfig</b> に、Firebaseの設定を貼り付けてください。</p>`);
+} else if(inApp){
+  showScreen(`<h1>📍 おもいでマップ</h1>
+    <p>LINEなどのアプリ内ブラウザではGoogleログインができません。<br>右上(または右下)のメニューから<b>「Safariで開く」「ブラウザで開く」</b>を選んでね。</p>
+    <div class="row"><button class="btn s" id="cpUrl">URLをコピー</button></div>`);
+  $("#cpUrl").onclick = async ()=>{ try{ await navigator.clipboard.writeText(location.href); toast("コピーしました"); }catch(_){ toast(location.href); } };
+} else {
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
+  getRedirectResult(auth).catch(e=>toast(errMsg(e)));
+  onAuthStateChanged(auth, u=>{
+    me = u;
+    if(!u){ stopListening(); setMainUI(false); showLogin(); return; }
+    const saved = LS.get("omoide.gid");
+    if(saved){ enterGroup(saved).catch(()=>{ LS.del("omoide.gid"); showGroupScreen(); }); }
+    else showGroupScreen();
+  });
+}
+
+// ---------- ログイン ----------
+function showLogin(){
+  showScreen(`<h1>📍 おもいでマップ</h1>
+    <p>友達と行ったお店を、写真つきで地図に残していこう。</p>
+    <div class="row"><button class="btn k" id="gLogin">Googleでログイン</button></div>`);
+  $("#gLogin").onclick = async ()=>{
+    const prov = new GoogleAuthProvider();
+    try{ await signInWithPopup(auth, prov); }
+    catch(e){
+      if(String(e.code).includes("popup-blocked") || String(e.code).includes("operation-not-supported")){ await signInWithRedirect(auth, prov); }
+      else toast(errMsg(e));
+    }
+  };
+}
+
+// ---------- グループ ----------
+async function hashCode(code){
+  const norm = "omoide:" + code.normalize("NFKC").trim().toLowerCase();
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(norm));
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("").slice(0,40);
+}
+function showGroupScreen(){
+  stopListening(); setMainUI(false);
+  let mode = "join";
+  const render = ()=>{
+    showScreen(`<h1>👥 グループ</h1>
+      <p>${esc(me.displayName||"")} さん、ようこそ！友達と同じ「合言葉」で同じ地図に入れます。</p>
+      <div class="tabs2"><button data-m="join" class="${mode==="join"?"on":""}">参加する</button><button data-m="create" class="${mode==="create"?"on":""}">新しく作る</button></div>
+      ${mode==="create" ? `<label class="f">グループ名</label><input type="text" id="gName" maxlength="30" placeholder="例：いつメン">` : ""}
+      <label class="f">合言葉(8文字以上)</label>
+      <input type="text" id="gCode" maxlength="60" autocomplete="off" autocapitalize="off" placeholder="${mode==="create"?"推測されにくい言葉にしてね":"友達から聞いた合言葉"}">
+      <div class="hint">${mode==="create" ? "合言葉を知っている人は誰でも参加できます。短い言葉や名前は避けてね。" : ""}</div>
+      <div class="row"><button class="btn p" id="gGo">${mode==="create"?"作成して入る":"参加する"}</button></div>
+      <div class="row" style="margin-top:8px"><button class="btn s" id="gOut">ログアウト</button></div>`);
+    document.querySelectorAll(".tabs2 button").forEach(b=>b.onclick=()=>{ mode=b.dataset.m; render(); });
+    $("#gOut").onclick = ()=>signOut(auth);
+    $("#gGo").onclick = async ()=>{
+      const code = $("#gCode").value.trim();
+      if(code.length < 8){ toast("合言葉は8文字以上にしてね"); return; }
+      const btn=$("#gGo"); btn.disabled=true;
+      try{
+        const id = await hashCode(code);
+        const ref = doc(db, "groups", id);
+        const snap = await getDoc(ref);
+        if(mode==="create"){
+          if(snap.exists()){ toast("その合言葉はもう使われています。別の言葉にしてね"); btn.disabled=false; return; }
+          const name = ($("#gName").value.trim() || "おもいでマップ").slice(0,30);
+          await setDoc(ref, { name, createdBy: me.uid, createdAt: Date.now() });
+        } else if(!snap.exists()){
+          toast("その合言葉のグループが見つかりません"); btn.disabled=false; return;
+        }
+        LS.set("omoide.code."+id, code);
+        await enterGroup(id);
+      }catch(e){ toast(errMsg(e)); btn.disabled=false; }
+    };
+  };
+  render();
+}
+async function enterGroup(id){
+  const snap = await getDoc(doc(db,"groups",id));
+  if(!snap.exists()) throw new Error("no group");
+  // 自分をメンバーとして登録(既にいれば名前を更新)
+  await setDoc(doc(db,"groups",id,"members",me.uid), { name: me.displayName || "名無し", photo: me.photoURL || "", joinedAt: Date.now() }, { merge:true });
+  gid = id; gname = snap.data().name || "おもいでマップ"; gcode = LS.get("omoide.code."+id) || "";
+  LS.set("omoide.gid", id);
+  hideScreen(); setMainUI(true); startListening();
+}
+function stopListening(){ unsubs.forEach(f=>{try{f()}catch(_){}}); unsubs=[]; spots=[]; members={}; markers.clearLayers(); }
+let firstFit = true;
+function startListening(){
+  stopListening(); firstFit = true;
+  unsubs.push(onSnapshot(collection(db,"groups",gid,"spots"), snap=>{
+    spots = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    renderAll();
+  }, e=>toast(errMsg(e))));
+  unsubs.push(onSnapshot(collection(db,"groups",gid,"members"), snap=>{
+    members = {}; snap.docs.forEach(d=>members[d.id]=d.data());
+    renderPill();
+  }, e=>{}));
+}
+
+// ---------- 描画 ----------
+const visible = () => spots.filter(s => filter==="all" || (s.genre||"other")===filter);
+const who = id => (members[id] && members[id].name) || "だれか";
+function renderPill(){
+  $("#pill").innerHTML = `🗺️ ${spots.length}ヶ所の記録<small>${esc(gname)}・${Object.keys(members).length}人</small>`;
+}
+function renderChips(){
+  const cnt={}; spots.forEach(s=>cnt[s.genre||"other"]=(cnt[s.genre||"other"]||0)+1);
+  const items=[{k:"all",label:"すべて",emoji:"✨"}].concat(GENRES.filter(g=>cnt[g.k]));
+  $("#chips").innerHTML = items.length>2 || filter!=="all" ? items.map(g=>`<button class="chip ${filter===g.k?"on":""}" data-k="${g.k}">${g.emoji} ${esc(g.label)}</button>`).join("") : "";
+}
+$("#pill").onclick = ()=>{ const pts=visible().filter(s=>typeof s.lat==="number"); if(pts.length) map.fitBounds(L.latLngBounds(pts.map(s=>[s.lat,s.lng])), {padding:[60,60], maxZoom:16}); };
+$("#chips").addEventListener("click", e=>{ const b=e.target.closest(".chip"); if(!b) return; filter=b.dataset.k; renderAll(); });
+function markerIcon(s){
+  const g = G[s.genre]||G.other;
+  const inner = s.thumb ? `<img src="${esc(s.thumb)}" alt="">` : g.emoji;
+  return L.divIcon({ className:"", iconSize:[52,60], iconAnchor:[26,52],
+    html:`<div class="mk" style="--c:${g.color}"><div class="mk-tail"></div><div class="mk-in">${inner}</div>${s.thumb?`<div class="mk-badge">${g.emoji}</div>`:""}<div class="mk-label">${esc(s.name)}</div></div>` });
+}
+function renderAll(){
+  renderPill(); renderChips();
+  markers.clearLayers();
+  const pts = visible().filter(s=>typeof s.lat==="number" && typeof s.lng==="number");
+  pts.forEach(s=>{ L.marker([s.lat,s.lng], {icon:markerIcon(s)}).on("click", ()=>openDetail(s.id)).addTo(markers); });
+  if(firstFit && pts.length){
+    firstFit=false;
+    if(pts.length===1) map.setView([pts[0].lat,pts[0].lng], 16);
+    else map.fitBounds(L.latLngBounds(pts.map(s=>[s.lat,s.lng])), {padding:[60,60], maxZoom:16});
+  }
+}
+
+// ---------- 一覧 ----------
+$("#bList").onclick = ()=>{
+  openSheet(`<h2>🔍 記録一覧</h2><input type="search" id="q" placeholder="お店の名前・メモで検索"><div id="items" style="margin-top:12px"></div>`);
+  const draw = ()=>{
+    const q = $("#q").value.trim().toLowerCase();
+    const arr = visible().filter(s=>!q || (s.name||"").toLowerCase().includes(q) || (s.note||"").toLowerCase().includes(q))
+      .sort((a,b)=>String(b.visited||"").localeCompare(String(a.visited||"")) || (b.createdAt||0)-(a.createdAt||0));
+    $("#items").innerHTML = arr.length ? arr.map(s=>{ const g=G[s.genre]||G.other;
+      return `<button class="item" data-id="${esc(s.id)}">${s.thumb?`<img class="thumb" src="${esc(s.thumb)}" alt="">`:`<div class="thumb" style="background:${g.color}22">${g.emoji}</div>`}
+        <div style="min-width:0"><div class="t">${esc(s.name)}</div><div class="m"><span class="stars">${starStr(s.rating)}</span> ・ ${g.emoji} ${esc(g.label)}</div>
+        <div class="m">${esc(s.visited||"")} ・ ${esc(who(s.createdBy))}</div></div></button>`; }).join("")
+      : `<p class="hint" style="text-align:center;margin:30px 0">${spots.length?"該当する記録がありません":"まだ記録がありません。下の＋から追加しよう"}</p>`;
+  };
+  $("#q").addEventListener("input", draw);
+  $("#items").addEventListener("click", e=>{ const b=e.target.closest(".item"); if(!b) return; const s=spots.find(x=>x.id===b.dataset.id); closeSheet(); if(s){ map.setView([s.lat,s.lng], Math.max(map.getZoom(),16)); openDetail(s.id); } });
+  draw();
+};
+
+// ---------- 詳細 ----------
+async function openDetail(id){
+  const s = spots.find(x=>x.id===id); if(!s) return;
+  const g = G[s.genre]||G.other;
+  const mine = me && s.createdBy===me.uid;
+  openSheet(`${s.thumb? `<img class="photo" id="dPhoto" src="${esc(s.thumb)}" alt="" style="filter:blur(6px)">`:""}
+    <h2 style="margin-top:12px">${g.emoji} ${esc(s.name)}</h2>
+    <div class="meta"><span class="stars" style="font-size:19px">${starStr(s.rating)}</span> また行きたい度<br>${esc(g.label)} ・ ${esc(s.visited||"日付なし")} ・ 記録：${esc(who(s.createdBy))}</div>
+    ${s.note?`<div class="note">${esc(s.note)}</div>`:""}
+    <a class="gm" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.lat+","+s.lng)}" target="_blank" rel="noopener">🗺️ Googleマップで開く</a>
+    <div class="row">${mine?`<button class="btn s" id="dEdit">✏️ 編集</button><button class="btn d" id="dDel">🗑️ 削除</button>`:""}<button class="btn s" id="dClose">閉じる</button></div>`);
+  $("#dClose").onclick = closeSheet;
+  if(mine){ $("#dEdit").onclick=()=>openForm(s, {lat:s.lat,lng:s.lng}); $("#dDel").onclick=()=>confirmDelete(s); }
+  if(s.hasPhoto){
+    try{ const p = await getDoc(doc(db,"groups",gid,"photos",s.id)); const el=$("#dPhoto"); if(el && p.exists()){ el.src=p.data().data; el.style.filter=""; } }
+    catch(_){ const el=$("#dPhoto"); if(el) el.style.filter=""; }
+  } else { const el=$("#dPhoto"); if(el) el.style.filter=""; }
+}
+function confirmDelete(s){
+  openSheet(`<h2>「${esc(s.name)}」を削除しますか？</h2><p class="hint">写真も一緒に消えます。元に戻せません。</p>
+    <div class="row"><button class="btn s" id="cNo">やめる</button><button class="btn d" id="cYes">削除する</button></div>`);
+  $("#cNo").onclick=()=>openDetail(s.id);
+  $("#cYes").onclick=async()=>{
+    $("#cYes").disabled=true;
+    try{
+      if(s.hasPhoto) await deleteDoc(doc(db,"groups",gid,"photos",s.id));
+      await deleteDoc(doc(db,"groups",gid,"spots",s.id));
+      closeSheet(); toast("削除しました");
+    }catch(e){ toast(errMsg(e)); $("#cYes").disabled=false; }
+  };
+}
+
+// ---------- 位置決めモード ----------
+let pickCb = null;
+function startPick(cb, at){
+  pickCb = cb; closeSheet();
+  setMainUI(false); $("#pick").style.display="block";
+  if(at) map.setView([at.lat,at.lng], Math.max(map.getZoom(),17));
+  else if(myPos) map.setView(myPos, Math.max(map.getZoom(),17));
+  else startLocate(true);
+}
+function endPick(){ $("#pick").style.display="none"; setMainUI(true); }
+$("#pCancel").onclick = ()=>{ const cb=pickCb; pickCb=null; endPick(); if(cb) cb(null); };
+$("#pHere").onclick = ()=>startLocate(true);
+$("#pOk").onclick = ()=>{ const c=map.getCenter(); const cb=pickCb; pickCb=null; endPick(); if(cb) cb({lat:c.lat, lng:c.lng}); };
+$("#bAdd").onclick = ()=>startPick(pos=>{ if(pos) openForm(null, pos); });
+
+// ---------- 写真処理 ----------
+function readExifGps(buf){
+  try{
+    const v=new DataView(buf); if(v.byteLength<4||v.getUint16(0)!==0xFFD8) return null;
+    let o=2;
+    while(o+4<v.byteLength){
+      const m=v.getUint16(o); if((m&0xFF00)!==0xFF00||m===0xFFDA) return null;
+      const len=v.getUint16(o+2);
+      if(m===0xFFE1 && o+10<v.byteLength && v.getUint32(o+4)===0x45786966){
+        const t=o+10, le=v.getUint16(t)===0x4949, u16=p=>v.getUint16(p,le), u32=p=>v.getUint32(p,le);
+        const ifd0=t+u32(t+4); let gps=0;
+        for(let i=0;i<u16(ifd0);i++){ const e=ifd0+2+i*12; if(u16(e)===0x8825) gps=t+u32(e+8); }
+        if(!gps) return null;
+        const rat3=off=>{let r=[];for(let k=0;k<3;k++){const p=off+k*8,d=u32(p+4);r.push(d?u32(p)/d:0);}return r[0]+r[1]/60+r[2]/3600;};
+        let latRef="N",lngRef="E",lat=null,lng=null;
+        for(let i=0;i<u16(gps);i++){ const e=gps+2+i*12, tag=u16(e);
+          if(tag===1) latRef=String.fromCharCode(v.getUint8(e+8)); else if(tag===3) lngRef=String.fromCharCode(v.getUint8(e+8));
+          else if(tag===2) lat=rat3(t+u32(e+8)); else if(tag===4) lng=rat3(t+u32(e+8)); }
+        if(lat==null||lng==null||!isFinite(lat)||!isFinite(lng)||(lat===0&&lng===0)) return null;
+        if(latRef==="S") lat=-lat; if(lngRef==="W") lng=-lng;
+        return {lat,lng};
+      }
+      o+=2+len;
+    }
+  }catch(_){}
+  return null;
+}
+async function loadImage(file){
+  const url=URL.createObjectURL(file);
+  try{ return await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; }); }
+  finally{ setTimeout(()=>URL.revokeObjectURL(url), 1000); }
+}
+function toDataURL(img, max, square, q){
+  let sw=img.naturalWidth, sh=img.naturalHeight, sx=0, sy=0;
+  if(square){ const m=Math.min(sw,sh); sx=(sw-m)/2; sy=(sh-m)/2; sw=sh=m; }
+  const k=Math.min(1, max/Math.max(sw,sh));
+  const c=document.createElement("canvas"); c.width=Math.max(1,Math.round(sw*k)); c.height=Math.max(1,Math.round(sh*k));
+  c.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", q);
+}
+async function makePhotos(file){
+  const img = await loadImage(file);
+  let full = toDataURL(img, 1080, false, 0.72);
+  if(full.length > 850000) full = toDataURL(img, 800, false, 0.6);   // Firestoreの1ドキュメント上限(約1MB)対策
+  const thumb = toDataURL(img, 140, true, 0.7);
+  return { full, thumb };
+}
+
+// ---------- 記録フォーム ----------
+function openForm(s, pos, st){
+  const edit = !!s;
+  st = st || {};
+  const f = { genre:st.genre||s?.genre||"meal", rating:st.rating||s?.rating||3, pos, file:null };
+  openSheet(`<h2>${edit?"✏️ 記録を編集":"📍 行ったお店を記録"}</h2>
+    <label class="f">お店の名前 *</label>
+    <input type="text" id="fName" maxlength="60" placeholder="例：〇〇ラーメン" value="${esc(s?.name||"")}">
+    <label class="f">ジャンル</label>
+    <div class="genres" id="fGenre">${GENRES.map(g=>`<button type="button" data-k="${g.k}" class="${g.k===f.genre?"on":""}">${g.emoji} ${g.label}</button>`).join("")}</div>
+    <label class="f">写真</label>
+    <input type="file" id="fPhoto" accept="image/*">
+    <img class="pv" id="fPv" alt="" ${s?.thumb?`src="${esc(s.thumb)}" style="display:block"`:""}>
+    <div class="hint" id="fPhotoMsg"></div>
+    <label class="f">場所</label>
+    <div class="hint" id="fPosMsg">📍 地図で選んだ位置</div>
+    <button type="button" class="btn s" id="fRepick" style="margin-top:6px;width:100%">位置を選び直す</button>
+    <label class="f">行った日</label>
+    <input type="date" id="fDate" value="${esc(s?.visited||todayStr())}">
+    <label class="f">また行きたい度</label>
+    <div class="rate" id="fRate">${[1,2,3,4,5].map(n=>`<button type="button" data-n="${n}" class="${n<=f.rating?"on":""}">★</button>`).join("")}</div>
+    <label class="f">ひとことメモ</label>
+    <textarea id="fNote" rows="3" maxlength="500" placeholder="味・雰囲気・誰と行ったか など">${esc(s?.note||"")}</textarea>
+    <div class="row"><button class="btn s" id="fCancel">キャンセル</button><button class="btn p" id="fSave">${edit?"更新する":"保存する"}</button></div>`);
+  // 位置を選び直したあとに入力内容を戻す
+  if(st.name!==undefined){ $("#fName").value=st.name; $("#fDate").value=st.visited; $("#fNote").value=st.note; }
+  $("#fGenre").onclick=e=>{ const b=e.target.closest("button"); if(!b) return; f.genre=b.dataset.k; [...$("#fGenre").children].forEach(x=>x.classList.toggle("on",x===b)); };
+  $("#fRate").onclick=e=>{ const b=e.target.closest("button"); if(!b) return; f.rating=+b.dataset.n; [...$("#fRate").children].forEach(x=>x.classList.toggle("on",+x.dataset.n<=f.rating)); };
+  $("#fRepick").onclick=()=>{
+    const keep = { name:$("#fName").value, visited:$("#fDate").value, note:$("#fNote").value, genre:f.genre, rating:f.rating, file:f.file };
+    const oldPos = f.pos;
+    startPick(p=>openForm(s, p||oldPos, keep), f.pos);
+  };
+  let exifPos = null;
+  const attachFile = async (file)=>{
+    f.file=file;
+    const pv=$("#fPv"); try{ pv.src=URL.createObjectURL(file); pv.style.display="block"; }catch(_){}
+    try{
+      exifPos = readExifGps(await file.slice(0,256*1024).arrayBuffer());
+      if(exifPos){
+        const d = map.distance([exifPos.lat,exifPos.lng],[f.pos.lat,f.pos.lng]);
+        if(d>30){
+          $("#fPhotoMsg").innerHTML = `写真の撮影場所が、選んだ位置から約${Math.round(d)}m離れています。<button type="button" class="btn s" id="useExif" style="margin-top:6px;width:100%">写真の場所を使う</button>`;
+          $("#useExif").onclick=()=>{ f.pos=exifPos; $("#fPosMsg").textContent="📍 写真の撮影場所"; $("#fPhotoMsg").textContent="✓ 写真の場所を使います"; };
+        } else $("#fPhotoMsg").textContent="";
+      }
+    }catch(_){}
+  };
+  $("#fPhoto").addEventListener("change", e=>{ const file=e.target.files&&e.target.files[0]; if(file) attachFile(file); });
+  if(st.file) attachFile(st.file);
+  $("#fCancel").onclick=()=> edit ? openDetail(s.id) : closeSheet();
+  $("#fSave").onclick=async()=>{
+    const name=$("#fName").value.trim();
+    if(!name){ toast("お店の名前を入れてね"); $("#fName").focus(); return; }
+    const btn=$("#fSave"); btn.disabled=true; btn.textContent="保存中…";
+    try{
+      let photos=null;
+      if(f.file){ try{ photos = await makePhotos(f.file); }catch(_){ toast("この写真は読み込めませんでした(JPEGで試してね)"); btn.disabled=false; btn.textContent=edit?"更新する":"保存する"; return; } }
+      const body = { name, genre:f.genre, rating:f.rating, visited:$("#fDate").value||"", note:$("#fNote").value.trim(),
+        lat:f.pos.lat, lng:f.pos.lng, updatedAt:Date.now() };
+      if(photos){ body.thumb=photos.thumb; body.hasPhoto=true; }
+      if(s && s.id){
+        await updateDoc(doc(db,"groups",gid,"spots",s.id), body);
+        if(photos) await setDoc(doc(db,"groups",gid,"photos",s.id), { data:photos.full });
+        closeSheet(); toast("更新しました");
+      } else {
+        body.createdBy=me.uid; body.createdAt=Date.now();
+        if(!photos){ body.thumb=""; body.hasPhoto=false; }
+        const ref = await addDoc(collection(db,"groups",gid,"spots"), body);
+        if(photos) await setDoc(doc(db,"groups",gid,"photos",ref.id), { data:photos.full });
+        closeSheet(); toast("記録しました🎉");
+      }
+    }catch(e){ toast(errMsg(e)); btn.disabled=false; btn.textContent=edit?"更新する":"保存する"; }
+  };
+}
+
+// ---------- メンバー・招待 ----------
+$("#bMembers").onclick = ()=>{
+  const list = Object.entries(members).sort((a,b)=>(a[1].joinedAt||0)-(b[1].joinedAt||0));
+  openSheet(`<h2>👥 ${esc(gname)}</h2>
+    ${list.map(([id,m])=>`<div class="member">${m.photo?`<img src="${esc(m.photo)}" alt="" referrerpolicy="no-referrer">`:`<div class="av">🙂</div>`}<div>${esc(m.name)}${id===me.uid?"(あなた)":""}<div class="hint" style="margin:0">${spots.filter(s=>s.createdBy===id).length}件の記録</div></div></div>`).join("")}
+    <label class="f">友達を招待</label>
+    ${gcode ? `<div class="hint">合言葉：<b>${esc(gcode)}</b></div><div class="row"><button class="btn p" id="inv">招待メッセージを送る</button></div>`
+            : `<div class="hint">この端末には合言葉が保存されていません。合言葉を知っている人に聞いてね。</div>`}
+    <div class="row"><button class="btn s" id="mClose">閉じる</button></div>`);
+  $("#mClose").onclick=closeSheet;
+  if(gcode) $("#inv").onclick=async()=>{
+    const text = `おもいでマップ「${gname}」に参加してね！\n${location.origin+location.pathname}\n合言葉：${gcode}\n(LINEで開いたら「ブラウザで開く」を選んでね)`;
+    try{ if(navigator.share){ await navigator.share({ text }); return; } }catch(_){ return; }
+    try{ await navigator.clipboard.writeText(text); toast("招待メッセージをコピーしました"); }catch(_){ toast("コピーできませんでした"); }
+  };
+};
+
+// ---------- 設定 ----------
+$("#bSettings").onclick = ()=>{
+  openSheet(`<h2>⚙️ 設定</h2>
+    <div class="meta">ログイン中：${esc(me.displayName||"")}<br>グループ：${esc(gname)}</div>
+    <div class="row"><button class="btn s" id="sSwitch">グループを切り替える</button></div>
+    <div class="row"><button class="btn s" id="sOut">ログアウト</button></div>
+    <p class="hint" style="margin-top:16px">地図：© OpenStreetMap contributors © CARTO</p>
+    <div class="row"><button class="btn s" id="sClose">閉じる</button></div>`);
+  $("#sClose").onclick=closeSheet;
+  $("#sSwitch").onclick=()=>{ closeSheet(); LS.del("omoide.gid"); gid=null; showGroupScreen(); };
+  $("#sOut").onclick=()=>{ closeSheet(); LS.del("omoide.gid"); signOut(auth); };
+};
+</script>
+</body>
+</html>
