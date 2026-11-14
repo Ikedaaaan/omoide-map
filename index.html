@@ -131,6 +131,7 @@
 <div class="side" id="sideUI" style="display:none">
   <button class="sbtn" id="bMembers" title="メンバー・招待">👥</button>
   <button class="sbtn" id="bSettings" title="設定">⚙️</button>
+  <button class="sbtn" id="bCompass" title="向きを表示">🧭</button>
 </div>
 <div class="bottom" id="bottomUI" style="display:none">
   <button class="bbtn" id="bList" title="一覧">🔍</button>
@@ -309,17 +310,27 @@ function onOrient(e){
   if(h==null) return;
   heading = Math.round(h); applyHeading();
 }
-async function startOrientation(){
-  if(orientOn) return;
+async function startOrientation(){ // 戻り値: "on" | "denied" | "unsupported" | "error:..."
+  if(orientOn) return "on";
+  if(typeof DeviceOrientationEvent==="undefined") return "unsupported";
   try{
-    if(typeof DeviceOrientationEvent!=="undefined" && typeof DeviceOrientationEvent.requestPermission==="function"){
-      const r = await DeviceOrientationEvent.requestPermission(); if(r!=="granted") return;
+    if(typeof DeviceOrientationEvent.requestPermission==="function"){
+      const r = await DeviceOrientationEvent.requestPermission(); // iPhoneはここで確認画面が出る
+      if(r!=="granted") return "denied";
     }
     window.addEventListener("deviceorientationabsolute", onOrient);
     window.addEventListener("deviceorientation", onOrient);
-    orientOn = true;
-  }catch(_){}
+    orientOn = true; return "on";
+  }catch(e){ return "error:" + (e && e.message || e); }
 }
+$("#bCompass").onclick = async ()=>{
+  const r = await startOrientation();
+  if(r==="denied"){ toast("向きの利用が拒否されています。Safariのタブを閉じて開き直すと、もう一度聞かれます"); return; }
+  if(r==="unsupported"){ toast("この端末・ブラウザは向きの表示に対応していません"); return; }
+  if(r.startsWith("error:")){ toast("確認画面を出せませんでした(" + r.slice(6) + ")"); return; }
+  if(!myPos) startLocate(true);
+  setTimeout(()=>{ toast(heading==null ? "向きの情報がまだ届いていません。スマホを少し動かしてみてね" : `向きを表示中(${heading}°)`); }, 1500);
+};
 $("#bLocate").onclick = ()=>{ startOrientation(); startLocate(true); };
 
 // ---------- 状態 ----------
