@@ -48,7 +48,16 @@
   .mk-label{position:absolute;top:56px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:12px;font-weight:800;color:var(--ink);
     text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;max-width:140px;overflow:hidden;text-overflow:ellipsis}
   .far .mk-label{display:none}
-  .me{width:20px;height:20px;border-radius:50%;background:#2f7bff;border:3px solid #fff;box-shadow:0 0 0 6px rgba(47,123,255,.25)}
+  .me{position:relative;width:46px;height:46px}
+  .me .ring{position:absolute;inset:-4px;border-radius:50%;background:rgba(47,123,255,.35);animation:mepulse 2s ease-out infinite}
+  .me .avatar{position:absolute;inset:0;border:3px solid #2f7bff;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+  @keyframes mepulse{0%{transform:scale(.9);opacity:.9}100%{transform:scale(1.7);opacity:0}}
+  .avatar{border-radius:50%;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;flex:none;background:#f3ebe2;box-sizing:border-box;vertical-align:middle;line-height:1}
+  .avatar img{width:100%;height:100%;object-fit:cover;display:block}
+  .mk-who{position:absolute;left:-6px;top:-6px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3);display:flex}
+  .icgrid{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .icgrid button{width:42px;height:42px;border-radius:12px;border:2px solid transparent;background:#f6f1ec;font-size:22px}
+  .icgrid button.on{border-color:var(--ink)}
   .mk{cursor:pointer}
 
   /* 位置決めモード */
@@ -89,7 +98,6 @@
   .item .t{font-weight:800;font-size:15px} .item .m{font-size:12px;color:var(--sub);margin-top:3px}
   .pv{margin-top:8px;max-width:100%;max-height:170px;border-radius:12px;display:none}
   .member{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
-  .member img,.member .av{width:36px;height:36px;border-radius:50%;background:#f3ebe2;display:flex;align-items:center;justify-content:center;object-fit:cover}
 
   /* 全画面(ログイン・グループ) */
   .screen{position:fixed;inset:0;z-index:1000;background:linear-gradient(160deg,#ff6b4a,#ffb03b);display:none;align-items:center;justify-content:center;padding:24px}
@@ -175,6 +183,23 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 const starStr = n => "★".repeat(n||0) + "☆".repeat(5-(n||0));
 const todayStr = () => { const d=new Date(), z=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`; };
 const LS = { get:k=>{try{return localStorage.getItem(k)}catch(_){return null}}, set:(k,v)=>{try{localStorage.setItem(k,v)}catch(_){}} , del:k=>{try{localStorage.removeItem(k)}catch(_){}} };
+// ---------- アイコン ----------
+const EMOJIS = ["😀","😎","🥳","🐻","🐱","🐶","🦊","🐼","🐸","🐧","🍜","☕","🍰","⚽","🎮","🌸","🔥","👾"];
+const ICON_COLORS = ["#ff6b4a","#ffb03b","#2bb673","#2f7bff","#8a5cf6","#ff7eb6","#1f1a17"];
+function myIconLS(){ try{ return JSON.parse(LS.get("omoide.icon")||"null"); }catch(_){ return null; } }
+// m = メンバー情報 {photo, icon}。size = px
+function avatarHTML(m, size){
+  const z = size||36, ic = m && m.icon;
+  const box = `width:${z}px;height:${z}px`;
+  if(ic && ic.type==="photo" && typeof ic.data==="string" && ic.data.startsWith("data:image/"))
+    return `<span class="avatar" style="${box}"><img src="${esc(ic.data)}" alt=""></span>`;
+  if(ic && ic.type==="emoji" && ic.emoji)
+    return `<span class="avatar" style="${box};background:${/^#[0-9a-f]{6}$/i.test(ic.color||"")?ic.color:"#ffb03b"};font-size:${Math.round(z*0.55)}px">${esc(ic.emoji)}</span>`;
+  if(m && m.photo)
+    return `<span class="avatar" style="${box}"><img src="${esc(m.photo)}" alt="" referrerpolicy="no-referrer"></span>`;
+  return `<span class="avatar" style="${box};font-size:${Math.round(z*0.55)}px">🙂</span>`;
+}
+const myself = () => ({ photo: me && me.photoURL, icon: myIconLS() || (me && members[me.uid] && members[me.uid].icon) || null });
 let toastT;
 function toast(m){ const t=$("#toast"); t.textContent=m; t.style.display="block"; clearTimeout(toastT); toastT=setTimeout(()=>t.style.display="none",3200); }
 function errMsg(e){
@@ -238,7 +263,7 @@ function startLocate(pan){
   if(watchId===null){
     watchId = navigator.geolocation.watchPosition(p=>{
       myPos = [p.coords.latitude, p.coords.longitude];
-      if(!meMarker){ const el=document.createElement("div"); el.className="me"; meMarker = new maplibregl.Marker({ element: el }).setLngLat([myPos[1], myPos[0]]).addTo(map); }
+      if(!meMarker) drawMe();
       else meMarker.setLngLat([myPos[1], myPos[0]]);
       if(pendingPan){ setView(myPos, Math.max(map.getZoom(),16)); pendingPan=false; }
     }, err=>{ toast(err.code===1 ? "位置情報の利用が許可されていません(ブラウザの設定を確認してね)" : "現在地を取得できませんでした"); pendingPan=false; },
@@ -247,6 +272,13 @@ function startLocate(pan){
   if(pan){ if(myPos){ setView(myPos, Math.max(map.getZoom(),16)); } else { pendingPan=true; } }
 }
 let pendingPan = false;
+function drawMe(){ // 現在地を自分のアイコンで表示(位置はこの端末の中だけで使い、送信しない)
+  if(!myPos) return;
+  if(meMarker){ meMarker.remove(); meMarker=null; }
+  const el=document.createElement("div"); el.className="me";
+  el.innerHTML = `<div class="ring"></div>${avatarHTML(myself(), 46)}`;
+  meMarker = new maplibregl.Marker({ element: el }).setLngLat([myPos[1], myPos[0]]).addTo(map);
+}
 $("#bLocate").onclick = ()=>startLocate(true);
 
 // ---------- 状態 ----------
@@ -341,7 +373,9 @@ async function enterGroup(id){
   const snap = await getDoc(doc(db,"groups",id));
   if(!snap.exists()) throw new Error("no group");
   // 自分をメンバーとして登録(既にいれば名前を更新)
-  await setDoc(doc(db,"groups",id,"members",me.uid), { name: me.displayName || "名無し", photo: me.photoURL || "", joinedAt: Date.now() }, { merge:true });
+  const mine = { name: me.displayName || "名無し", photo: me.photoURL || "", joinedAt: Date.now() };
+  const ic = myIconLS(); if(ic) mine.icon = ic;   // 端末に保存したアイコンをこのグループにも反映
+  await setDoc(doc(db,"groups",id,"members",me.uid), mine, { merge:true });
   gid = id; gname = snap.data().name || "おもいでマップ"; gcode = LS.get("omoide.code."+id) || "";
   LS.set("omoide.gid", id);
   hideScreen(); setMainUI(true); startListening();
@@ -357,7 +391,9 @@ function startListening(){
   }, e=>toast(errMsg(e))));
   unsubs.push(onSnapshot(collection(db,"groups",gid,"members"), snap=>{
     members = {}; snap.docs.forEach(d=>members[d.id]=d.data());
-    renderPill();
+    const mine = members[me.uid];
+    if(mine && mine.icon && !myIconLS()) LS.set("omoide.icon", JSON.stringify(mine.icon)); // 別の端末で設定したアイコンを引き継ぐ
+    renderAll(); drawMe();
   }, e=>{}));
 }
 
@@ -378,7 +414,7 @@ function markerEl(s){
   const g = G[s.genre]||G.other;
   const inner = s.thumb ? `<img src="${esc(s.thumb)}" alt="">` : g.emoji;
   const el = document.createElement("div");  // MapLibreが位置を管理する外側の箱
-  el.innerHTML = `<div class="mk" style="--c:${g.color}"><div class="mk-tail"></div><div class="mk-in">${inner}</div>${s.thumb?`<div class="mk-badge">${g.emoji}</div>`:""}<div class="mk-label">${esc(s.name)}</div></div>`;
+  el.innerHTML = `<div class="mk" style="--c:${g.color}"><div class="mk-tail"></div><div class="mk-in">${inner}</div>${s.thumb?`<div class="mk-badge">${g.emoji}</div>`:""}${members[s.createdBy]?`<div class="mk-who">${avatarHTML(members[s.createdBy],22)}</div>`:""}<div class="mk-label">${esc(s.name)}</div></div>`;
   el.addEventListener("click", e=>{ e.stopPropagation(); openDetail(s.id); });
   return el;
 }
@@ -415,7 +451,7 @@ async function openDetail(id){
   const mine = me && s.createdBy===me.uid;
   openSheet(`${s.thumb? `<img class="photo" id="dPhoto" src="${esc(s.thumb)}" alt="" style="filter:blur(6px)">`:""}
     <h2 style="margin-top:12px">${g.emoji} ${esc(s.name)}</h2>
-    <div class="meta"><span class="stars" style="font-size:19px">${starStr(s.rating)}</span> また行きたい度<br>${esc(g.label)} ・ ${esc(s.visited||"日付なし")} ・ 記録：${esc(who(s.createdBy))}</div>
+    <div class="meta"><span class="stars" style="font-size:19px">${starStr(s.rating)}</span> また行きたい度<br>${esc(g.label)} ・ ${esc(s.visited||"日付なし")} ・ 記録：${avatarHTML(members[s.createdBy],20)} ${esc(who(s.createdBy))}</div>
     ${s.note?`<div class="note">${esc(s.note)}</div>`:""}
     <a class="gm" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.lat+","+s.lng)}" target="_blank" rel="noopener">🗺️ Googleマップで開く</a>
     <div class="row">${mine?`<button class="btn s" id="dEdit">✏️ 編集</button><button class="btn d" id="dDel">🗑️ 削除</button>`:""}<button class="btn s" id="dClose">閉じる</button></div>`);
@@ -583,7 +619,7 @@ function openForm(s, pos, st){
 $("#bMembers").onclick = ()=>{
   const list = Object.entries(members).sort((a,b)=>(a[1].joinedAt||0)-(b[1].joinedAt||0));
   openSheet(`<h2>👥 ${esc(gname)}</h2>
-    ${list.map(([id,m])=>`<div class="member">${m.photo?`<img src="${esc(m.photo)}" alt="" referrerpolicy="no-referrer">`:`<div class="av">🙂</div>`}<div>${esc(m.name)}${id===me.uid?"(あなた)":""}<div class="hint" style="margin:0">${spots.filter(s=>s.createdBy===id).length}件の記録</div></div></div>`).join("")}
+    ${list.map(([id,m])=>`<div class="member">${avatarHTML(m,36)}<div>${esc(m.name)}${id===me.uid?"(あなた)":""}<div class="hint" style="margin:0">${spots.filter(s=>s.createdBy===id).length}件の記録</div></div></div>`).join("")}
     <label class="f">友達を招待</label>
     ${gcode ? `<div class="hint">合言葉：<b>${esc(gcode)}</b></div><div class="row"><button class="btn p" id="inv">招待メッセージを送る</button></div>`
             : `<div class="hint">この端末には合言葉が保存されていません。合言葉を知っている人に聞いてね。</div>`}
@@ -599,14 +635,57 @@ $("#bMembers").onclick = ()=>{
 // ---------- 設定 ----------
 $("#bSettings").onclick = ()=>{
   openSheet(`<h2>⚙️ 設定</h2>
-    <div class="meta">ログイン中：${esc(me.displayName||"")}<br>グループ：${esc(gname)}</div>
+    <label class="f">アイコン(グループのみんなに表示されます)</label>
+    <div style="display:flex;align-items:center;gap:14px">
+      <span id="icPrev">${avatarHTML(myself(),72)}</span>
+      <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+        <label class="btn p" style="text-align:center">📷 写真を選ぶ<input type="file" id="icFile" accept="image/*" hidden></label>
+        <button class="btn s" id="icEmojiBtn">😀 絵文字にする</button>
+        <button class="btn s" id="icGoogle">Googleの写真に戻す</button>
+      </div>
+    </div>
+    <div id="icEmojiPanel" style="display:none">
+      <div class="icgrid" id="icEmojis">${EMOJIS.map(e=>`<button type="button" data-e="${e}">${e}</button>`).join("")}</div>
+      <div class="icgrid" id="icColors">${ICON_COLORS.map(c=>`<button type="button" data-c="${c}" style="background:${c}" aria-label="色 ${c}"></button>`).join("")}</div>
+      <div class="row"><button class="btn p" id="icEmojiOk">この絵文字にする</button></div>
+    </div>
+    <div class="meta" style="margin-top:16px">ログイン中：${esc(me.displayName||"")}<br>グループ：${esc(gname)}</div>
     <div class="row"><button class="btn s" id="sSwitch">グループを切り替える</button></div>
     <div class="row"><button class="btn s" id="sOut">ログアウト</button></div>
-    <p class="hint" style="margin-top:16px">地図：© OpenStreetMap contributors © CARTO</p>
+    <p class="hint" style="margin-top:16px">地図：© OpenStreetMap contributors © OpenFreeMap</p>
     <div class="row"><button class="btn s" id="sClose">閉じる</button></div>`);
   $("#sClose").onclick=closeSheet;
   $("#sSwitch").onclick=()=>{ closeSheet(); LS.del("omoide.gid"); gid=null; showGroupScreen(); };
-  $("#sOut").onclick=()=>{ closeSheet(); LS.del("omoide.gid"); signOut(auth); };
+  $("#sOut").onclick=()=>{ closeSheet(); LS.del("omoide.gid"); LS.del("omoide.icon"); signOut(auth); };
+
+  const saveIcon = async (ic)=>{
+    try{
+      await setDoc(doc(db,"groups",gid,"members",me.uid), { icon: ic }, { merge:true });
+      LS.set("omoide.icon", JSON.stringify(ic));
+      $("#icPrev").innerHTML = avatarHTML(myself(),72);
+      drawMe(); toast("アイコンを変更しました");
+    }catch(e){ toast(errMsg(e)); }
+  };
+  $("#icFile").addEventListener("change", async e=>{
+    const file = e.target.files && e.target.files[0]; if(!file) return;
+    try{
+      const img = await loadImage(file);
+      let data = toDataURL(img, 160, true, 0.8);
+      if(data.length > 55000) data = toDataURL(img, 120, true, 0.7);
+      await saveIcon({ type:"photo", data });
+    }catch(_){ toast("この写真は読み込めませんでした(JPEGで試してね)"); }
+  });
+  $("#icGoogle").onclick = ()=>saveIcon({ type:"google" });
+  const cur = myIconLS() || {};
+  let pickE = cur.emoji || EMOJIS[0], pickC = cur.color || ICON_COLORS[1];
+  const mark = ()=>{
+    [...$("#icEmojis").children].forEach(b=>b.classList.toggle("on", b.dataset.e===pickE));
+    [...$("#icColors").children].forEach(b=>b.classList.toggle("on", b.dataset.c===pickC));
+  };
+  $("#icEmojiBtn").onclick = ()=>{ $("#icEmojiPanel").style.display="block"; mark(); };
+  $("#icEmojis").onclick = e=>{ const b=e.target.closest("button"); if(!b) return; pickE=b.dataset.e; mark(); };
+  $("#icColors").onclick = e=>{ const b=e.target.closest("button"); if(!b) return; pickC=b.dataset.c; mark(); };
+  $("#icEmojiOk").onclick = ()=>saveIcon({ type:"emoji", emoji:pickE, color:pickC });
 };
 </script>
 </body>
