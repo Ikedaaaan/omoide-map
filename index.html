@@ -101,6 +101,31 @@
   .rl-lock{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;text-align:center;padding:20px;background:rgba(0,0,0,.25)}
   .late{color:#d9443a;font-weight:800;font-size:12px}
   .ontime{color:#1f9d60;font-weight:800;font-size:12px}
+  /* アルバム */
+  .al-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
+  .al-th{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;display:block;cursor:pointer;background:#f3ebe2}
+  .al-add{aspect-ratio:1;border:2px dashed #e0cfbf;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:26px;color:#c08a5c;cursor:pointer;font-weight:800}
+  .al-add span{font-size:12px}
+  .al-h{display:flex;align-items:baseline;gap:6px;margin-top:16px;font-weight:800;font-size:16px}
+  #viewer{position:fixed;inset:0;z-index:1500;background:#000;display:none;flex-direction:column}
+  #viewer.show{display:flex}
+  #viewer .vtop{display:flex;align-items:center;gap:8px;padding:calc(var(--st) + 10px) 12px 10px;color:#fff;font-size:14px}
+  #viewer .vtop #vInfo{flex:1;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  #viewer .vbtn{border:none;background:rgba(255,255,255,.18);color:#fff;border-radius:12px;padding:8px 12px;font-size:15px;font-family:inherit;font-weight:700}
+  #viewer .vmid{flex:1;position:relative;display:flex;align-items:center;justify-content:center;min-height:0}
+  #vImg{max-width:100%;max-height:100%;object-fit:contain}
+  #vPrev,#vNext{position:absolute;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;border:none;background:rgba(255,255,255,.25);color:#fff;font-size:22px}
+  #vPrev{left:8px} #vNext{right:8px}
+  /* おもいでタイムの振り返り */
+  .rtabs{display:flex;gap:6px;margin:4px 0 12px}
+  .rtabs button{flex:1;border:none;border-radius:12px;padding:10px;font-weight:800;font-family:inherit;background:#f3ebe2;color:var(--ink)}
+  .rtabs button.on{background:#111;color:#fff}
+  .rday{font-weight:800;margin:14px 0 6px}
+  .rgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .rcell{position:relative;cursor:pointer}
+  .rcell img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;display:block;background:#222}
+  .rcell.blur img{filter:blur(8px)}
+  .rcell span{position:absolute;left:4px;bottom:4px;right:4px;font-size:11px;color:#fff;font-weight:800;text-shadow:0 1px 3px rgba(0,0,0,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .frpin-in.old{opacity:.6}
   .frpin-in.fuzzy .frpic{border-style:dashed}
   .mebase{position:relative;width:200px;height:200px;pointer-events:none}
@@ -208,6 +233,7 @@
 <div class="ov" id="ov"><div class="sheet" id="sheet"></div></div>
 <div class="screen" id="screen"><div class="card" id="card"></div></div>
 <div class="toast" id="toast"></div>
+<div id="viewer"><div class="vtop"><div id="vInfo"></div><button class="vbtn" id="vDel">🗑️</button><button class="vbtn" id="vClose">✕</button></div><div class="vmid"><img id="vImg" alt=""><button id="vPrev">‹</button><button id="vNext">›</button></div></div>
 <div id="realBar"><b id="realText"></b><button id="realShoot">撮る</button></div>
 
 <script type="module">
@@ -229,7 +255,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getMessaging, getToken, onMessage, isSupported } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
-import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, onSnapshot }
+import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, onSnapshot, query, where, getDocs }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // ---------- 定数・小道具 ----------
@@ -676,11 +702,14 @@ async function openDetail(id){
     <h2 style="margin-top:12px">${g.emoji} ${esc(s.name)}</h2>
     <div class="meta"><span class="stars" style="font-size:19px">${starStr(s.rating)}</span> また行きたい度<br>${esc(g.label)} ・ ${esc(s.visited||"日付なし")} ・ 記録：<a href="#" id="dWho" style="color:inherit;font-weight:800">${avatarHTML(members[s.createdBy],20)} ${esc(who(s.createdBy))}</a></div>
     ${s.note?`<div class="note">${esc(s.note)}</div>`:""}
+    <div class="al-h">📚 アルバム <span class="hint" style="margin:0" id="dAlbumN"></span></div>
+    <div class="al-grid" id="dAlbum"><p class="hint" style="grid-column:1/-1">読み込み中…</p></div>
     <a class="gm" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.lat+","+s.lng)}" target="_blank" rel="noopener">🗺️ Googleマップで開く</a>
     <div class="row">${mine?`<button class="btn s" id="dEdit">✏️ 編集</button><button class="btn d" id="dDel">🗑️ 削除</button>`:""}<button class="btn s" id="dClose">閉じる</button></div>`);
   $("#dClose").onclick = closeSheet;
   $("#dWho").onclick = e=>{ e.preventDefault(); openProfile(s.createdBy); };
   if(mine){ $("#dEdit").onclick=()=>openForm(s, {lat:s.lat,lng:s.lng}); $("#dDel").onclick=()=>confirmDelete(s); }
+  renderAlbum(s);
   if(s.hasPhoto){
     try{ const p = await getDoc(doc(db,"groups",gid,"photos",s.id)); const el=$("#dPhoto"); if(el && p.exists()){ el.src=p.data().data; el.style.filter=""; } }
     catch(_){ const el=$("#dPhoto"); if(el) el.style.filter=""; }
@@ -761,6 +790,79 @@ async function makePhotos(file){
   if(full.length > 850000) full = toDataURL(img, 800, false, 0.6);   // Firestoreの1ドキュメント上限(約1MB)対策
   const thumb = toDataURL(img, 140, true, 0.7);
   return { full, thumb };
+}
+
+// ---------- アルバム(場所ごとに写真を何枚でも) ----------
+let viewerList = [], viewerIdx = 0, viewerSpot = null;
+async function loadAlbum(spotId){
+  const snap = await getDocs(query(collection(db,"groups",gid,"album"), where("spotId","==",spotId)));
+  return snap.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>a.at-b.at);
+}
+async function renderAlbum(s){
+  const box = $("#dAlbum"); if(!box) return;
+  let items = [];
+  try{ items = await loadAlbum(s.id); }catch(e){ box.innerHTML = `<p class="hint">アルバムを読み込めませんでした</p>`; return; }
+  if(!$("#dAlbum")) return;
+  $("#dAlbumN").textContent = items.length ? `(${items.length}枚)` : "";
+  box.innerHTML = (items.length ? items.map((a,i)=>`<img class="al-th" data-i="${i}" src="${esc(a.thumb)}" alt="">`).join("") : `<p class="hint" style="grid-column:1/-1">まだ写真がありません。みんなで追加しよう！</p>`)
+    + `<label class="al-add">＋<span>追加</span><input type="file" id="alFile" accept="image/*" multiple hidden></label>`;
+  box.querySelectorAll(".al-th").forEach(el=>el.onclick = ()=>openViewer(items, +el.dataset.i, s));
+  $("#alFile").addEventListener("change", e=>addAlbumPhotos(s, e.target.files));
+}
+async function addAlbumPhotos(s, files){
+  files = [...(files||[])].slice(0, 20); if(!files.length) return;
+  let ok = 0;
+  for(let i=0;i<files.length;i++){
+    toast(`アップロード中… ${i+1}/${files.length}`);
+    try{
+      const img = await loadImage(files[i]);
+      let full = toDataURL(img, 1280, false, 0.75);
+      if(full.length > 850000) full = toDataURL(img, 960, false, 0.6);
+      const thumb = toDataURL(img, 200, true, 0.7);
+      const ref = await addDoc(collection(db,"groups",gid,"album"), { spotId: s.id, uid: me.uid, at: Date.now(), thumb });
+      await setDoc(doc(db,"groups",gid,"albimg",ref.id), { data: full });
+      ok++;
+    }catch(e){ toast(errMsg(e)); }
+  }
+  if(ok) toast(`📚 ${ok}枚追加しました`);
+  renderAlbum(s);
+}
+function openViewer(list, i, s){
+  viewerList = list; viewerIdx = i; viewerSpot = s;
+  $("#viewer").classList.add("show"); showViewer();
+}
+function closeViewer(){ $("#viewer").classList.remove("show"); $("#vImg").src = ""; }
+async function showViewer(){
+  const a = viewerList[viewerIdx]; if(!a) return;
+  const img = $("#vImg"); img.src = a.thumb; img.style.filter = "blur(4px)";
+  $("#vInfo").innerHTML = `${avatarHTML(members[a.uid],22)} <b>${esc(who(a.uid))}</b> ・ ${mdText(jstDate(a.at))} ${hhmm(a.at)} <span style="opacity:.7">(${viewerIdx+1}/${viewerList.length})</span>`;
+  $("#vDel").style.display = me && a.uid===me.uid ? "" : "none";
+  $("#vPrev").style.visibility = viewerIdx>0 ? "visible" : "hidden";
+  $("#vNext").style.visibility = viewerIdx<viewerList.length-1 ? "visible" : "hidden";
+  try{
+    const p = await getDoc(doc(db,"groups",gid,"albimg",a.id));
+    if(viewerList[viewerIdx]===a && p.exists()){ img.src = p.data().data; }
+  }catch(_){}
+  if(viewerList[viewerIdx]===a) img.style.filter = "";
+}
+function stepViewer(d){ const n = viewerIdx + d; if(n<0 || n>=viewerList.length) return; viewerIdx = n; showViewer(); }
+$("#vClose").onclick = closeViewer;
+$("#vPrev").onclick = ()=>stepViewer(-1);
+$("#vNext").onclick = ()=>stepViewer(1);
+$("#vDel").onclick = async ()=>{
+  const a = viewerList[viewerIdx]; if(!a || !confirm("この写真を削除しますか？(元に戻せません)")) return;
+  try{
+    await deleteDoc(doc(db,"groups",gid,"albimg",a.id));
+    await deleteDoc(doc(db,"groups",gid,"album",a.id));
+    toast("削除しました");
+    viewerList.splice(viewerIdx,1);
+    if(!viewerList.length){ closeViewer(); } else { viewerIdx = Math.min(viewerIdx, viewerList.length-1); showViewer(); }
+    if(viewerSpot) renderAlbum(viewerSpot);
+  }catch(e){ toast(errMsg(e)); }
+};
+{ let sx = null;
+  $("#viewer").addEventListener("touchstart", e=>{ sx = e.touches[0].clientX; }, { passive:true });
+  $("#viewer").addEventListener("touchend", e=>{ if(sx===null) return; const dx = e.changedTouches[0].clientX - sx; sx = null; if(Math.abs(dx) > 50) stepViewer(dx < 0 ? 1 : -1); });
 }
 
 // ---------- 記録フォーム ----------
@@ -968,16 +1070,34 @@ function realCardHTML(r, img){
 async function loadRealImg(id){ try{ const s = await getDoc(doc(db,"groups",gid,"realimg",id)); return s.exists() ? s.data() : null; }catch(_){ return null; } }
 function bindSwap(root){ root.querySelectorAll(".rl-img").forEach(box=>box.addEventListener("click", ()=>{ if(box.classList.contains("blur")) return; const b=box.querySelector(".bk"), f=box.querySelector(".fr"); if(b&&f){ const t=b.src; b.src=f.src; f.src=t; } })); }
 
+let realTab = "today";
+function openRealHistory(){
+  const all = Object.values(reals).sort((a,b)=>b.at-a.at);
+  const days = {}; all.forEach(r=>{ (days[r.date] = days[r.date] || []).push(r); });
+  const keys = Object.keys(days).sort().reverse();
+  openSheet(`<h2>⚡ おもいでタイム</h2>
+    <div class="rtabs"><button id="tToday">今日</button><button class="on">これまで</button></div>
+    ${keys.length ? `<p class="hint">これまでの投稿 ${all.length}件(${keys.length}日分)</p>` + keys.map(d=>`<div class="rday">${mdText(d)}${d===jstDate()?"(今日)":""}</div>
+      <div class="rgrid">${days[d].map(r=>`<div class="rcell${realHidden(r)?" blur":""}" data-id="${esc(r.id)}"><img src="${esc(r.thumb||"")}" alt=""><span>${esc(who(r.uid))}${r.late?" ⏰":" ⚡"}</span></div>`).join("")}</div>`).join("")
+      : `<p class="hint">まだ投稿がありません</p>`}
+    <div class="row"><button class="btn s" id="hClose">閉じる</button></div>`);
+  realTab = "history";
+  $("#tToday").onclick = ()=>{ realTab = "today"; openRealFeed(); };
+  $("#hClose").onclick = closeSheet;
+  document.querySelectorAll(".rcell").forEach(el=>el.onclick = ()=>openReal(el.dataset.id, true));
+}
 async function openRealFeed(){
   const today = Object.values(reals).filter(r=>r.date===jstDate()).sort((a,b)=>a.at-b.at);
   const head = !daily || daily.date!==jstDate()
     ? `<p class="hint">今日のおもいでタイムはまだです。12〜21時のどこかで通知が来ます。</p>`
     : (postedToday() ? "" : `<div class="row" style="margin-top:0"><button class="btn p" id="fShoot">📸 今すぐ撮る</button></div>`);
-  openSheet(`<h2>⚡ 今日のおもいでタイム</h2>${head}
+  realTab = "today";
+  openSheet(`<h2>⚡ おもいでタイム</h2>
+    <div class="rtabs"><button class="on">今日</button><button id="tHist">これまで</button></div>${head}
     <div id="fList">${today.length ? today.map(r=>realCardHTML(r, null)).join("") : `<p class="hint">まだ誰も投稿していません</p>`}</div>
-    <p class="hint">過去の投稿は、地図の⚡ピンからいつでも見返せます。</p>
     <div class="row"><button class="btn s" id="fClose">閉じる</button></div>`);
   $("#fClose").onclick = closeSheet;
+  $("#tHist").onclick = openRealHistory;
   if($("#fShoot")) $("#fShoot").onclick = openRealCapture;
   // 大きい写真はあとから読み込む(ぼかし中のものは読み込まない)
   for(const r of today){
@@ -988,12 +1108,14 @@ async function openRealFeed(){
   }
   if($("#fList")) bindSwap($("#fList"));
 }
-async function openReal(id){
+async function openReal(id, fromHist){
   const r = reals[id]; if(!r) return;
   const mine = me && r.uid===me.uid;
   openSheet(`<h2>⚡ おもいでタイム</h2><div id="rOne">${realCardHTML(r, null)}</div>
-    <div class="row">${mine?`<button class="btn d" id="rDel">🗑️ 削除</button>`:""}<button class="btn s" id="rClose2">閉じる</button></div>`);
-  $("#rClose2").onclick = closeSheet;
+    <a class="gm" href="#" id="rMap">📍 撮った場所を地図で見る</a>
+    <div class="row">${mine?`<button class="btn d" id="rDel">🗑️ 削除</button>`:""}<button class="btn s" id="rClose2">${fromHist?"‹ 一覧へ":"閉じる"}</button></div>`);
+  $("#rClose2").onclick = fromHist ? openRealHistory : closeSheet;
+  $("#rMap").onclick = e=>{ e.preventDefault(); closeSheet(); if(filter!=="all" && filter!=="real"){ filter="all"; renderAll(); } setView([r.lat, r.lng], Math.max(map.getZoom(),16)); };
   if(mine) $("#rDel").onclick = ()=>{
     openSheet(`<h2>この投稿を削除しますか？</h2><p class="hint">参加しているすべてのグループから消えます。元に戻せません。</p>
       <div class="row"><button class="btn s" id="rdNo">やめる</button><button class="btn d" id="rdYes">削除する</button></div>`);
