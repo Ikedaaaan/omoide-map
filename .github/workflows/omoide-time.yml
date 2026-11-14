@@ -1,0 +1,28 @@
+# おもいでタイム：毎日12〜21時(日本時間)のランダムな時刻に、全員へ通知を送る
+name: omoide-time
+
+on:
+  schedule:
+    # 日本時間 12:00〜20:50 の間、10分おきに起動(UTCで3〜11時)。送るのは1日1回だけ
+    - cron: "*/10 3-11 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "今すぐ送る(テスト用)"
+        type: boolean
+        default: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-save firebase-admin@12
+      - run: node scripts/omoide-time.js
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FORCE: ${{ inputs.force }}
