@@ -126,6 +126,17 @@
   .lfog img{width:100%;height:100%;object-fit:cover;filter:blur(14px);transform:scale(1.2)}
   .lfog span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:56px;background:rgba(255,255,255,.35)}
   .ltr .bdg{position:absolute;right:-7px;bottom:-7px;width:22px;height:22px;border-radius:50%;background:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.3)}
+  /* 合流ショット */
+  #meetBar{position:fixed;left:12px;right:12px;bottom:calc(var(--sb) + 170px);z-index:560;background:#fff;border-radius:18px;padding:10px 10px 10px 14px;display:none;align-items:center;gap:8px;box-shadow:0 6px 18px rgba(0,0,0,.22);border:2px solid var(--accent)}
+  #meetBar.show{display:flex}
+  #meetBar b{flex:1;font-size:13px;line-height:1.4}
+  #meetBar button{border:none;border-radius:12px;font-weight:800;padding:9px 12px;font-family:inherit}
+  #meetShoot{background:var(--accent);color:#fff}
+  #meetX{background:#f3ebe2;color:var(--ink)}
+  .mpin{position:relative;width:56px;height:56px;cursor:pointer}
+  .mpic{width:56px;height:56px;border-radius:50%;border:3px solid #2f7bff;overflow:hidden;background:#ddd;box-sizing:border-box;box-shadow:0 3px 10px rgba(0,0,0,.3)}
+  .mpic img{width:100%;height:100%;object-fit:cover;display:block}
+  .mbdg{position:absolute;right:-10px;top:-6px;background:#2f7bff;color:#fff;font-size:11px;font-weight:800;border-radius:999px;padding:2px 6px;box-shadow:0 1px 4px rgba(0,0,0,.3)}
   /* 足あとモード */
   #bFoot.on{background:var(--accent);color:#fff}
   #footPanel{position:fixed;left:12px;top:calc(var(--st) + 110px);z-index:500;background:rgba(255,255,255,.95);border-radius:16px;padding:10px 12px;box-shadow:0 4px 14px rgba(0,0,0,.15);max-width:58%;display:none;font-size:13px}
@@ -272,6 +283,7 @@
 <div class="screen" id="screen"><div class="card" id="card"></div></div>
 <div class="toast" id="toast"></div>
 <div id="footPanel"></div>
+<div id="meetBar"><b id="meetText"></b><button id="meetShoot">撮る</button><button id="meetX">✕</button></div>
 <div id="rhist"><div class="rh-top"><b>⚡ これまでのおもいでタイム</b><button class="rh-x" id="rhClose">✕</button></div><div class="rh-body" id="rhBody"></div></div>
 <div id="viewer"><div class="vtop"><div id="vInfo"></div><button class="vbtn" id="vDel">🗑️</button><button class="vbtn" id="vClose">✕</button></div><div class="vmid"><img id="vImg" alt=""><button id="vPrev">‹</button><button id="vNext">›</button></div></div>
 <div id="realBar"><b id="realText"></b><button id="realShoot">撮る</button></div>
@@ -436,6 +448,7 @@ function startLocate(pan){
       else moveMe();
       sendLoc(false);
       recordTrail(p.coords.latitude, p.coords.longitude, p.coords.accuracy);
+      checkMeet();
       if(pendingPan){ setView(myPos, Math.max(map.getZoom(),16)); pendingPan=false; }
     }, err=>{ toast(err.code===1 ? "位置情報の利用が許可されていません(ブラウザの設定を確認してね)" : "現在地を取得できませんでした"); pendingPan=false; },
     { enableHighAccuracy:true, maximumAge:15000, timeout:20000 });
@@ -697,7 +710,7 @@ function drawFriends(){
 }
 setInterval(drawFriends, 60000);
 document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) sendLoc(true); });
-function stopListening(){ unsubs.forEach(f=>{try{f()}catch(_){}}); unsubs=[]; spots=[]; members={}; locs={}; reals={}; trails={}; letters={}; lopens={}; customGenres=[]; applyGenres(); clearMarkers(); drawFriends(); drawReals(); drawLetters(); }
+function stopListening(){ unsubs.forEach(f=>{try{f()}catch(_){}}); unsubs=[]; spots=[]; members={}; locs={}; reals={}; trails={}; letters={}; lopens={}; meets={}; customGenres=[]; applyGenres(); clearMarkers(); drawFriends(); drawReals(); drawLetters(); drawMeets(); }
 function clearMarkers(){ markerObjs.forEach(m=>m.remove()); markerObjs=[]; }
 let firstFit = true;
 function startListening(){
@@ -715,7 +728,7 @@ function startListening(){
   }, e=>{}));
   unsubs.push(onSnapshot(collection(db,"groups",gid,"locs"), snap=>{
     locs = {}; snap.docs.forEach(d=>locs[d.id]=d.data());
-    drawFriends();
+    drawFriends(); checkMeet();
   }, e=>{}));
   unsubs.push(onSnapshot(collection(db,"groups",gid,"genres"), snap=>{
     customGenres = snap.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>a.at-b.at)
@@ -733,6 +746,10 @@ function startListening(){
   unsubs.push(onSnapshot(collection(db,"groups",gid,"lopen"), snap=>{
     lopens = {}; snap.docs.forEach(d=>lopens[d.id]=d.data());
     drawLetters();
+  }, e=>{}));
+  unsubs.push(onSnapshot(collection(db,"groups",gid,"meets"), snap=>{
+    meets = {}; snap.docs.forEach(d=>meets[d.id]={ id:d.id, ...d.data() });
+    drawMeets(); updateFoot();
   }, e=>{}));
   let realsFirst = true;
   unsubs.push(onSnapshot(collection(db,"groups",gid,"reals"), snap=>{
@@ -772,7 +789,7 @@ function markerEl(s){
   return el;
 }
 function renderAll(){
-  renderPill(); renderChips(); drawReals(); drawLetters(); updateFoot();
+  renderPill(); renderChips(); drawReals(); drawLetters(); drawMeets(); updateFoot();
   clearMarkers();
   const pts = visible().filter(s=>typeof s.lat==="number" && typeof s.lng==="number");
   pts.forEach(s=>{ markerObjs.push(new maplibregl.Marker({ element: markerEl(s), anchor:"top-left", offset:[-26,-52] }).setLngLat([s.lng, s.lat]).addTo(map)); });
@@ -1008,11 +1025,13 @@ function openAddChooser(){
       <button class="btn p" id="adMap" style="width:100%">📍 地図で場所を選んで記録</button>
       <button class="btn p" id="adPhoto" style="width:100%">📷 写真から作る(撮影場所を自動で読み取り)</button>
       <button class="btn p" id="adLetter" style="width:100%">📷 置き写真を置く(今いる場所に)</button>
+      <button class="btn p" id="adMeet" style="width:100%">👥 合流ショット(友達と一緒に1枚)</button>
       <button class="btn s" id="adNo" style="width:100%">やめる</button>
     </div>`);
   $("#adMap").onclick = ()=>startPick(pos=>{ if(pos) openForm(null, pos); });
   $("#adPhoto").onclick = openPhotoImport;
   $("#adLetter").onclick = openLetterForm;
+  $("#adMeet").onclick = ()=>openMeetCapture(meetNearby);
   $("#adNo").onclick = closeSheet;
 }
 function openPhotoImport(){
@@ -1139,6 +1158,7 @@ function monthCells(m){
   for(const t of Object.values(trails)) if((t.date||"").startsWith(m)) for(const k of (t.pts||[])) put(t.uid, String(k));
   spots.forEach(s=>{ if(spotMonth(s)===m && typeof s.lat==="number") put(s.createdBy, cellKey(s.lat,s.lng)); });
   Object.values(reals).forEach(r=>{ if((r.date||"").startsWith(m) && typeof r.lat==="number") put(r.uid, cellKey(r.lat,r.lng)); });
+  Object.values(meets).forEach(M=>{ if(jstDate(M.at||0).startsWith(m) && typeof M.lat==="number") [M.uid, ...(M.with||[])].forEach(u=>put(u, cellKey(M.lat,M.lng))); });
   return cells;
 }
 function footFeatures(){
@@ -1285,6 +1305,91 @@ async function showLetterBody(id, head, openersHTML){
     if(!$("#lBody")) return;
     $("#lBody").outerHTML = `${b.photo?`<img class="photo" src="${esc(b.photo)}" alt="" style="margin-top:8px">`:""}${b.text?`<div class="note" style="font-size:16px">${esc(b.text)}</div>`:""}`;
   }catch(e){ if($("#lBody")) $("#lBody").textContent = "開けませんでした"; }
+}
+
+// ---------- 👥 合流ショット(友達と近くにいるときに一緒に1枚) ----------
+const MEET_M = 100, MEET_FRESH = 10*60*1000, MEET_SNOOZE = 3*3600*1000;
+let meets = {}, meetMarkers = [], meetNearby = [];
+function meetSeen(){ try{ return JSON.parse(LS.get("omoide.meetseen")||"{}"); }catch(_){ return {}; } }
+function markMeetSeen(uids){ const m = meetSeen(); uids.forEach(u=>m[u]=Date.now()); LS.set("omoide.meetseen", JSON.stringify(m)); }
+// 位置共有中の友達が100m以内・10分以内に更新していたら声をかける(同じ人には3時間に1回まで)
+function checkMeet(){
+  const bar = $("#meetBar"); if(!bar) return;
+  if(!me || !gid || !myPos){ bar.classList.remove("show"); return; }
+  const seen = meetSeen(), now = Date.now();
+  meetNearby = Object.entries(locs).filter(([u,L])=>u!==me.uid && !L.fuzzy && typeof L.lat==="number" && now-(L.updatedAt||0) < MEET_FRESH
+    && distM({lat:myPos[0],lng:myPos[1]}, {lat:L.lat,lng:L.lng}) <= MEET_M).map(([u])=>u);
+  const fresh = meetNearby.filter(u=>!(seen[u] && now-seen[u] < MEET_SNOOZE));
+  if(!fresh.length){ bar.classList.remove("show"); return; }
+  $("#meetText").textContent = `👥 ${fresh.map(u=>who(u)).slice(0,3).join("さん、")}さん${fresh.length>3?"たち":""}が近くにいるよ！一緒に1枚撮ろう`;
+  bar.classList.add("show");
+}
+$("#meetX").onclick = ()=>{ markMeetSeen(meetNearby); $("#meetBar").classList.remove("show"); };
+$("#meetShoot").onclick = ()=>{ markMeetSeen(meetNearby); $("#meetBar").classList.remove("show"); openMeetCapture(meetNearby); };
+setInterval(checkMeet, 30000);
+
+function openMeetCapture(pre){
+  if(!gid){ toast("グループに入ってから使えます"); return; }
+  const sel = new Set((pre||[]).filter(u=>members[u]));
+  const st = { photo:null, thumb:null };
+  const others = Object.keys(members).filter(u=>u!==me.uid);
+  openSheet(`<h2>👥 合流ショット</h2>
+    <p class="hint">一緒にいる友達を選んで、1枚撮ろう。写真は<b>今いる場所</b>に「◯人で来た」記録として残ります。</p>
+    <label class="f">一緒にいる人</label>
+    <div class="genres" id="mWith">${others.length ? others.map(u=>`<button type="button" data-u="${esc(u)}" class="${sel.has(u)?"on":""}">${avatarHTML(members[u],20)} ${esc(who(u))}</button>`).join("") : `<span class="hint">グループに友達がいません</span>`}</div>
+    <label class="f">写真 *</label>
+    <input type="file" id="mPhoto" accept="image/*">
+    <img class="pv" id="mPv" alt="">
+    <div class="row"><button class="btn s" id="mNo">やめる</button><button class="btn p" id="mOk">ここに残す</button></div>`);
+  $("#mNo").onclick = closeSheet;
+  $("#mWith").onclick = e=>{ const b=e.target.closest("button[data-u]"); if(!b) return; const u=b.dataset.u; if(sel.has(u)) sel.delete(u); else sel.add(u); b.classList.toggle("on", sel.has(u)); };
+  $("#mPhoto").addEventListener("change", async e=>{
+    const f = e.target.files && e.target.files[0]; if(!f) return;
+    try{ const img = await loadImage(f); let d = toDataURL(img, 1080, false, 0.72); if(d.length > 850000) d = toDataURL(img, 800, false, 0.6); st.photo = d; st.thumb = toDataURL(img, 140, true, 0.7); const pv=$("#mPv"); pv.src=d; pv.style.display="block"; }catch(_){ toast("写真を読み込めませんでした"); }
+  });
+  $("#mOk").onclick = async ()=>{
+    if(!sel.size){ toast("一緒にいる人を選んでね"); return; }
+    if(!st.photo){ toast("写真を撮ってね"); return; }
+    const btn = $("#mOk"); btn.disabled = true; btn.textContent = "場所を確認中…";
+    const pos = await currentPos();
+    if(!pos){ toast("位置情報が取れませんでした。位置情報を許可してね"); btn.disabled=false; btn.textContent="ここに残す"; return; }
+    btn.textContent = "保存中…";
+    try{
+      const ref = await addDoc(collection(db,"groups",gid,"meets"), { uid: me.uid, at: Date.now(), lat: pos.lat, lng: pos.lng, with: [...sel], thumb: st.thumb });
+      await setDoc(doc(db,"groups",gid,"meetimg",ref.id), { data: st.photo });
+      closeSheet(); toast(`👥 ${sel.size+1}人で来た記録を残しました`); setView([pos.lat, pos.lng], Math.max(map.getZoom(), 16));
+    }catch(e){ toast(errMsg(e)); btn.disabled=false; btn.textContent="ここに残す"; }
+  };
+}
+function drawMeets(){
+  meetMarkers.forEach(m=>m.remove()); meetMarkers = [];
+  if(!me || filter!=="all") return;
+  for(const M of Object.values(meets)){
+    if(typeof M.lat!=="number" || typeof M.lng!=="number") continue;
+    const n = 1 + (M.with||[]).length;
+    const el = document.createElement("div");
+    el.innerHTML = `<div class="mpin"><div class="mpic">${M.thumb?`<img src="${esc(M.thumb)}" alt="">`:""}</div><div class="mbdg">👥${n}</div><div class="plabel"><b>${n}人で</b><span>${mdText(jstDate(M.at))}</span></div></div>`;
+    el.addEventListener("click", e=>{ e.stopPropagation(); openMeet(M.id); });
+    meetMarkers.push(new maplibregl.Marker({ element: el, anchor:"center" }).setLngLat([M.lng, M.lat]).addTo(map));
+  }
+}
+async function openMeet(id){
+  const M = meets[id]; if(!M) return;
+  const people = [M.uid, ...(M.with||[])];
+  const mine = M.uid===me.uid;
+  openSheet(`<h2>👥 ${people.length}人で来た！</h2>
+    <p class="hint">${mdText(jstDate(M.at))} ${hhmm(M.at)}</p>
+    <div class="genres" style="margin-bottom:8px">${people.map(u=>`<span class="chip on" style="pointer-events:none">${avatarHTML(members[u],20)} ${esc(who(u))}</span>`).join("")}</div>
+    <img class="photo" id="mImg" src="${esc(M.thumb||"")}" alt="" style="filter:blur(4px)">
+    <div class="row">${mine?`<button class="btn d" id="mDel">🗑️ 削除</button>`:""}<button class="btn s" id="mClose">閉じる</button></div>`);
+  $("#mClose").onclick = closeSheet;
+  if(mine) $("#mDel").onclick = ()=>{
+    openSheet(`<h2>この合流ショットを削除しますか？</h2><p class="hint">元に戻せません。</p><div class="row"><button class="btn s" id="mdNo">やめる</button><button class="btn d" id="mdYes">削除する</button></div>`);
+    $("#mdNo").onclick = ()=>openMeet(id);
+    $("#mdYes").onclick = async ()=>{ try{ await deleteDoc(doc(db,"groups",gid,"meetimg",id)); await deleteDoc(doc(db,"groups",gid,"meets",id)); closeSheet(); toast("削除しました"); }catch(e){ toast(errMsg(e)); } };
+  };
+  try{ const s = await getDoc(doc(db,"groups",gid,"meetimg",id)); const el=$("#mImg"); if(el && s.exists()) el.src = s.data().data; }catch(_){}
+  const el = $("#mImg"); if(el) el.style.filter = "";
 }
 
 // ---------- 記録フォーム ----------
