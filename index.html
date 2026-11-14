@@ -1762,17 +1762,17 @@ async function drawArt(){
   const minSpan = 0.006; // 最低でも約600m四方
   if(la1-la0 < minSpan){ const c=(la0+la1)/2; la0=c-minSpan/2; la1=c+minSpan/2; }
   if((lo1-lo0)*k < minSpan){ const c=(lo0+lo1)/2; lo0=c-minSpan/2/k; lo1=c+minSpan/2/k; }
-  const W = 1080, H = 1350, padX = 90, top = 230, bottom = 300;
+  const W = 1080, H = 1350, padX = 90, top = 230, bottom = 300, inX = padX + 80, inTop = top + 80, inBot = bottom + 110;   // 写真が見出し・凡例にかぶらないよう内側に余白
   cv.width = W; cv.height = H;
   const x = cv.getContext("2d");
-  const sc = Math.min((W-2*padX)/((lo1-lo0)*k), (H-top-bottom)/(la1-la0));
-  const ox = (W - (lo1-lo0)*k*sc)/2, oy = top + ((H-top-bottom) - (la1-la0)*sc)/2;
+  const sc = Math.min((W-2*inX)/((lo1-lo0)*k), (H-inTop-inBot)/(la1-la0));
+  const ox = (W - (lo1-lo0)*k*sc)/2, oy = inTop + ((H-inTop-inBot) - (la1-la0)*sc)/2;
   const P = (lat,lng)=>[ox + (lng-lo0)*k*sc, oy + (la1-lat)*sc];
   // 背景(紙っぽく)
   x.fillStyle = "#fbf6ee"; x.fillRect(0,0,W,H);
   for(let i=0;i<1400;i++){ x.fillStyle = `rgba(150,120,90,${Math.random()*0.05})`; x.fillRect(Math.random()*W, Math.random()*H, 2, 2); }
   // 足あと(にじむ丸)
-  const r50 = Math.max(10, 0.00045*sc);   // 約50m
+  const r50 = Math.max(26, 0.00045*sc);   // 約50m(広い範囲のときも見えるよう最低サイズあり)
   x.globalCompositeOperation = "multiply";
   uids.forEach(u=>{
     const col = memberColor(u);
