@@ -126,6 +126,10 @@
   .fp-dot{width:12px;height:12px;border-radius:50%;flex:none}
   .fp-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .fp-n{font-weight:800}
+  .fp-head{display:flex;align-items:center;gap:6px}
+  .fp-head b{flex:1;text-align:center;white-space:nowrap}
+  .fp-head button{border:none;background:#f3ebe2;border-radius:8px;width:28px;height:26px;font-size:16px;font-weight:800;color:var(--ink)}
+  .fp-head button:disabled{opacity:.3}
   /* おもいでタイムの振り返り(メモリーズ風) */
   #rhist{position:fixed;inset:0;z-index:880;background:#000;color:#fff;display:none;flex-direction:column}
   #rhist.show{display:flex}
@@ -1105,16 +1109,27 @@ async function recordTrail(lat, lng, acc){
     try{ await setDoc(doc(db,"groups",g,"trail",me.uid+"_"+d), { uid: me.uid, date: d, pts: arrayUnion(k), updatedAt: Date.now() }, { merge: true }); }catch(_){}
   }
 }
+// 月ごとに塗る(見た目は毎月リセット。過去の月は ‹ › で見返せる)
+let footMonth = null;
+const curMonth = () => jstDate().slice(0,7);
+const spotMonth = s => (s.visited && /^\d{4}-\d{2}/.test(s.visited)) ? s.visited.slice(0,7) : jstDate(s.createdAt || Date.now()).slice(0,7);
+function monthCells(m){
+  const cells = {};   // uid -> Set(マス)
+  const put = (u,k)=>{ (cells[u] = cells[u] || new Set()).add(k); };
+  for(const t of Object.values(trails)) if((t.date||"").startsWith(m)) for(const k of (t.pts||[])) put(t.uid, String(k));
+  spots.forEach(s=>{ if(spotMonth(s)===m && typeof s.lat==="number") put(s.createdBy, cellKey(s.lat,s.lng)); });
+  Object.values(reals).forEach(r=>{ if((r.date||"").startsWith(m) && typeof r.lat==="number") put(r.uid, cellKey(r.lat,r.lng)); });
+  return cells;
+}
 function footFeatures(){
-  const f = [];
-  const add = (uid, lat, lng)=>{ if(typeof lat==="number" && typeof lng==="number" && isFinite(lat) && isFinite(lng)) f.push({ type:"Feature", properties:{ c: memberColor(uid) }, geometry:{ type:"Point", coordinates:[lng, lat] } }); };
-  for(const t of Object.values(trails)) for(const k of (t.pts||[])){ const [a,b] = String(k).split(",").map(Number); add(t.uid, a, b); }
-  spots.forEach(s=>add(s.createdBy, s.lat, s.lng));
-  Object.values(reals).forEach(r=>add(r.uid, r.lat, r.lng));
+  const f = [], cells = monthCells(footMonth || curMonth());
+  for(const [u,set] of Object.entries(cells)) for(const k of set){
+    const [a,b] = k.split(",").map(Number); if(!isFinite(a) || !isFinite(b)) continue;
+    f.push({ type:"Feature", properties:{ c: memberColor(u) }, geometry:{ type:"Point", coordinates:[b, a] } });
+  }
   return { type:"FeatureCollection", features:f };
 }
-let mapReady = !!(map.style && map.style._loaded);
-map.on("load", ()=>{ mapReady = true; if(footOn) setFoot(true); });
+function shiftMonth(m, d){ let [y,mm] = m.split("-").map(Number); mm += d; while(mm<1){ mm+=12; y--; } while(mm>12){ mm-=12; y++; } return `${y}-${String(mm).padStart(2,"0")}`; }
 function ensureFootLayers(){
   if(!mapReady) return false;
   if(!map.getSource("foot")){
@@ -1134,24 +1149,32 @@ function updateFoot(){
 }
 function updateFootPanel(){
   const el = $("#footPanel"); if(!el || !footOn) return;
-  const all = {}, month = {}; const m = jstDate().slice(0,7);
-  const put = (o,u,k)=>{ (o[u] = o[u] || new Set()).add(k); };
-  for(const t of Object.values(trails)) for(const k of (t.pts||[])){ put(all, t.uid, k); if((t.date||"").startsWith(m)) put(month, t.uid, k); }
-  spots.forEach(s=>put(all, s.createdBy, cellKey(s.lat,s.lng)));
-  Object.values(reals).forEach(r=>put(all, r.uid, cellKey(r.lat,r.lng)));
-  const n = (o,u)=>o[u] ? o[u].size : 0;
-  const uids = Object.keys(members).sort((a,b)=>n(all,b)-n(all,a));
-  el.innerHTML = `<b>👣 足あとモード</b><div class="fp-sub">今月の自分：${n(month, me && me.uid)}マス</div>`
-    + uids.map(u=>`<div class="fp-row"><span class="fp-dot" style="background:${memberColor(u)}"></span><span class="fp-name">${esc(who(u))}</span><span class="fp-n">${n(all,u)}</span></div>`).join("")
-    + `<div class="fp-sub">${trailOn() ? "歩いた道とお店の周りが色付きます" : "歩いた道の記録はオフ(⚙️で変更)"}</div>`;
+  const m = footMonth || curMonth(), isCur = m===curMonth();
+  const cells = monthCells(m), n = u => cells[u] ? cells[u].size : 0;
+  const uids = [...new Set([...Object.keys(members), ...Object.keys(cells)])].filter(u=>members[u] || n(u)).sort((a,b)=>n(b)-n(a));
+  let extra = "";
+  if(isCur && +jstDate().slice(8,10) <= 7){   // 月初めの1週間は先月の1位を発表
+    const pc = monthCells(shiftMonth(m,-1)); const top = Object.keys(pc).sort((a,b)=>pc[b].size-pc[a].size)[0];
+    if(top && pc[top].size) extra = `<div class="fp-sub">🏆 先月の1位は${esc(who(top))}さん(${pc[top].size}マス)</div>`;
+  }
+  el.innerHTML = `<div class="fp-head"><button type="button" data-mv="-1">‹</button><b>👣 ${+m.slice(0,4)}年${+m.slice(5,7)}月</b><button type="button" data-mv="1" ${isCur?"disabled":""}>›</button></div>`
+    + `<div class="fp-sub">${isCur ? `今月の自分：${n(me && me.uid)}マス` : "この月の足あと"}</div>` + extra
+    + uids.map((u,i)=>`<div class="fp-row"><span class="fp-dot" style="background:${memberColor(u)}"></span><span class="fp-name">${n(u)&&i===0?"👑 ":""}${esc(who(u))}</span><span class="fp-n">${n(u)}</span></div>`).join("")
+    + `<div class="fp-sub">${isCur ? (trailOn() ? "毎月1日にまっさらからスタート" : "歩いた道の記録はオフ(⚙️で変更)") : "過去の月は見返すだけ"}</div>`;
 }
+$("#footPanel").addEventListener("click", e=>{
+  const b = e.target.closest("button[data-mv]"); if(!b || b.disabled) return;
+  const m = shiftMonth(footMonth || curMonth(), +b.dataset.mv);
+  footMonth = m > curMonth() ? curMonth() : m;
+  updateFoot();
+});
 function setFoot(on){
   footOn = on;
   $("#bFoot").classList.toggle("on", on);
   $("#footPanel").classList.toggle("show", on);
   if(!ensureFootLayers()) return;   // 地図の準備ができたら load で続きをやる
   ["fog","foot"].forEach(id=>map.setLayoutProperty(id, "visibility", on ? "visible" : "none"));
-  if(on){ updateFoot(); if(map.getZoom() > 15) map.easeTo({ zoom: 14 }); }
+  if(on){ footMonth = curMonth(); updateFoot(); if(map.getZoom() > 15) map.easeTo({ zoom: 14 }); }
 }
 $("#bFoot").onclick = ()=>setFoot(!footOn);
 
