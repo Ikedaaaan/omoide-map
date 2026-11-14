@@ -259,7 +259,7 @@ import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collec
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // ---------- 定数・小道具 ----------
-const GENRES = [
+const BASE_GENRES = [
   {k:"cafe",label:"カフェ",emoji:"☕",color:"#b07a45"},
   {k:"ramen",label:"ラーメン",emoji:"🍜",color:"#e8553a"},
   {k:"meal",label:"ごはん",emoji:"🍚",color:"#2bb673"},
@@ -268,7 +268,44 @@ const GENRES = [
   {k:"play",label:"あそび",emoji:"🎳",color:"#5b7cfa"},
   {k:"other",label:"その他",emoji:"📌",color:"#8a7d72"},
 ];
+// グループで追加したジャンル(旅行など)を後ろにつなげて使う
+let GENRES = [...BASE_GENRES], customGenres = [];
 const G = Object.fromEntries(GENRES.map(g=>[g.k,g]));
+const GENRE_COLORS = ["#0ea5e9","#14b8a6","#a855f7","#f43f5e","#84cc16","#f97316","#6366f1","#d946ef"];
+const cleanEmoji = e => (String(e||"").replace(/[<>&"'`\\]/g,"").slice(0,8) || "🏷️");
+function applyGenres(){
+  GENRES = [...BASE_GENRES, ...customGenres];
+  for(const k of Object.keys(G)) delete G[k];
+  GENRES.forEach(g=>G[g.k]=g);
+}
+// ジャンルのボタン一覧(最後に「＋ 新しいジャンル」)
+function genreChipsHTML(id, sel){
+  return `<div class="genres" id="${id}">${GENRES.map(x=>`<button type="button" data-k="${esc(x.k)}" class="${x.k===sel?"on":""}">${esc(x.emoji)} ${esc(x.label)}</button>`).join("")}<button type="button" data-add="1" style="border-style:dashed">＋ 新しいジャンル</button></div>
+    <div id="${id}New" style="display:none;margin-top:8px"><div style="display:flex;gap:6px"><input type="text" id="${id}E" maxlength="4" placeholder="✈️" style="width:64px;text-align:center"><input type="text" id="${id}L" maxlength="12" placeholder="例：旅行" style="flex:1"><button type="button" class="btn p" id="${id}Ok" style="padding:8px 14px">追加</button></div><div class="hint">絵文字1つと名前(12文字まで)。グループのみんなが使えます。</div></div>`;
+}
+function bindGenreChips(id, onPick){
+  const box = $("#"+id);
+  box.onclick = e=>{
+    const b = e.target.closest("button"); if(!b) return;
+    if(b.dataset.add){ const n=$("#"+id+"New"); n.style.display = n.style.display==="none" ? "block" : "none"; if(n.style.display==="block") $("#"+id+"L").focus(); return; }
+    onPick(b.dataset.k); [...box.children].forEach(x=>x.classList.toggle("on", x===b));
+  };
+  $("#"+id+"Ok").onclick = async ()=>{
+    const label = $("#"+id+"L").value.trim(), emoji = cleanEmoji($("#"+id+"E").value.trim());
+    if(!label){ toast("ジャンルの名前を入れてね"); return; }
+    const dup = GENRES.find(g=>g.label===label); if(dup){ toast("同じ名前のジャンルがあります"); return; }
+    try{
+      const ref = await addDoc(collection(db,"groups",gid,"genres"), { label, emoji, createdBy: me.uid, at: Date.now() });
+      const g = { k:"c_"+ref.id, label, emoji, color: GENRE_COLORS[customGenres.length % GENRE_COLORS.length], createdBy: me.uid };
+      if(!G[g.k]){ customGenres.push(g); applyGenres(); }
+      const bt = document.createElement("button"); bt.type="button"; bt.dataset.k=g.k; bt.textContent=`${emoji} ${label}`;
+      box.insertBefore(bt, box.lastElementChild);
+      onPick(g.k); [...box.children].forEach(x=>x.classList.toggle("on", x===bt));
+      $("#"+id+"New").style.display="none"; $("#"+id+"L").value=""; $("#"+id+"E").value="";
+      toast(`「${label}」を追加しました`);
+    }catch(e){ toast(errMsg(e)); }
+  };
+}
 const DEFAULT_CENTER = [37.87, 138.95]; // 新潟市西区あたり(初期表示用の目安)
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -619,7 +656,7 @@ function drawFriends(){
 }
 setInterval(drawFriends, 60000);
 document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) sendLoc(true); });
-function stopListening(){ unsubs.forEach(f=>{try{f()}catch(_){}}); unsubs=[]; spots=[]; members={}; locs={}; reals={}; clearMarkers(); drawFriends(); drawReals(); }
+function stopListening(){ unsubs.forEach(f=>{try{f()}catch(_){}}); unsubs=[]; spots=[]; members={}; locs={}; reals={}; customGenres=[]; applyGenres(); clearMarkers(); drawFriends(); drawReals(); }
 function clearMarkers(){ markerObjs.forEach(m=>m.remove()); markerObjs=[]; }
 let firstFit = true;
 function startListening(){
@@ -638,6 +675,11 @@ function startListening(){
   unsubs.push(onSnapshot(collection(db,"groups",gid,"locs"), snap=>{
     locs = {}; snap.docs.forEach(d=>locs[d.id]=d.data());
     drawFriends();
+  }, e=>{}));
+  unsubs.push(onSnapshot(collection(db,"groups",gid,"genres"), snap=>{
+    customGenres = snap.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>a.at-b.at)
+      .map((x,i)=>({ k:"c_"+x.id, label:String(x.label||"").slice(0,12), emoji:cleanEmoji(x.emoji), color: GENRE_COLORS[i % GENRE_COLORS.length], createdBy:x.createdBy }));
+    applyGenres(); renderAll();
   }, e=>{}));
   let realsFirst = true;
   unsubs.push(onSnapshot(collection(db,"groups",gid,"reals"), snap=>{
@@ -977,9 +1019,9 @@ function impStep(keep){
     <label class="f">お店・場所の名前 *</label>
     <input type="text" id="impName" maxlength="60" placeholder="例：〇〇カフェ" value="${esc(keep.name||"")}">
     <label class="f">ジャンル</label>
-    <div class="genres" id="impGenre">${GENRES.map(x=>`<button type="button" data-k="${x.k}" class="${x.k===genre?"on":""}">${x.emoji} ${x.label}</button>`).join("")}</div>
+    ${genreChipsHTML("impGenre", genre)}
     <div class="row"><button class="btn s" id="impSkip">この場所はスキップ</button><button class="btn p" id="impSave">新しく作って保存</button></div>`);
-  $("#impGenre").onclick = e=>{ const b=e.target.closest("button"); if(!b) return; genre=b.dataset.k; [...$("#impGenre").children].forEach(x=>x.classList.toggle("on",x===b)); };
+  bindGenreChips("impGenre", k=>{ genre=k; });
   $("#impPick").onclick = ()=>{
     const k = { name: $("#impName").value, genre };
     startPick(p=>{ if(p) g.pos = p; impStep(k); }, g.pos || undefined);
@@ -1020,7 +1062,7 @@ function openForm(s, pos, st){
     <label class="f">お店の名前 *</label>
     <input type="text" id="fName" maxlength="60" placeholder="例：〇〇ラーメン" value="${esc(s?.name||"")}">
     <label class="f">ジャンル</label>
-    <div class="genres" id="fGenre">${GENRES.map(g=>`<button type="button" data-k="${g.k}" class="${g.k===f.genre?"on":""}">${g.emoji} ${g.label}</button>`).join("")}</div>
+    ${genreChipsHTML("fGenre", f.genre)}
     <label class="f">写真</label>
     <input type="file" id="fPhoto" accept="image/*">
     <img class="pv" id="fPv" alt="" ${s?.thumb?`src="${esc(s.thumb)}" style="display:block"`:""}>
@@ -1037,7 +1079,7 @@ function openForm(s, pos, st){
     <div class="row"><button class="btn s" id="fCancel">キャンセル</button><button class="btn p" id="fSave">${edit?"更新する":"保存する"}</button></div>`);
   // 位置を選び直したあとに入力内容を戻す
   if(st.name!==undefined){ $("#fName").value=st.name; $("#fDate").value=st.visited; $("#fNote").value=st.note; }
-  $("#fGenre").onclick=e=>{ const b=e.target.closest("button"); if(!b) return; f.genre=b.dataset.k; [...$("#fGenre").children].forEach(x=>x.classList.toggle("on",x===b)); };
+  bindGenreChips("fGenre", k=>{ f.genre=k; });
   $("#fRate").onclick=e=>{ const b=e.target.closest("button"); if(!b) return; f.rating=+b.dataset.n; [...$("#fRate").children].forEach(x=>x.classList.toggle("on",+x.dataset.n<=f.rating)); };
   $("#fRepick").onclick=()=>{
     const keep = { name:$("#fName").value, visited:$("#fDate").value, note:$("#fNote").value, genre:f.genre, rating:f.rating, file:f.file };
@@ -1451,6 +1493,8 @@ $("#bSettings").onclick = ()=>{
     <label class="f">🔔 おもいでタイムの通知</label>
     <div class="hint" id="pushStat">${pushStatusText()}</div>
     ${isIOS && !isStandalone() ? "" : `<div class="row" style="margin-top:8px"><button class="btn s" id="sPush">通知をオンにする</button></div>`}
+    <label class="f">🏷️ グループのジャンル</label>
+    <div id="sGenres">${customGenres.length ? customGenres.map(g=>`<div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span style="flex:1">${esc(g.emoji)} ${esc(g.label)}</span>${g.createdBy===me.uid?`<button type="button" class="btn s" data-del="${esc(g.k)}" style="padding:6px 10px">削除</button>`:""}</div>`).join("") : `<div class="hint">まだありません。記録するときの「＋ 新しいジャンル」から追加できます。</div>`}</div>
     <label class="f">現在地の共有</label>
     <div class="tabs2" id="shareSeg" style="margin-top:0">
       <button data-v="off">共有しない</button><button data-v="on">共有する</button><button data-v="fuzzy">あいまい</button>
@@ -1466,6 +1510,11 @@ $("#bSettings").onclick = ()=>{
   $("#sSwitch").onclick=()=>openGroupSheet();
   $("#sOut").onclick=async ()=>{ closeSheet(); await clearMyLocs(); LS.del("omoide.gid"); LS.del("omoide.icon"); LS.del("omoide.share"); LS.del("omoide.profile"); signOut(auth); };
 
+  $("#sGenres").onclick = async e=>{
+    const b = e.target.closest("button[data-del]"); if(!b) return;
+    const g = G[b.dataset.del]; if(!g || !confirm(`ジャンル「${g.label}」を削除しますか？\nこのジャンルの記録は「その他」として表示されます。`)) return;
+    try{ await deleteDoc(doc(db,"groups",gid,"genres",g.k.slice(2))); b.parentElement.remove(); toast("削除しました"); }catch(err){ toast(errMsg(err)); }
+  };
   if($("#sPush")) $("#sPush").onclick = async ()=>{ await enablePush(); const el=$("#pushStat"); if(el) el.textContent = pushStatusText(); };
   const markShare = ()=>[...$("#shareSeg").children].forEach(b=>b.classList.toggle("on", b.dataset.v===shareMode()));
   markShare();
