@@ -903,34 +903,33 @@ function openRealCapture(){
   if(postedToday()){ openRealFeed(); return; }
   const st = { back:null, front:null };
   openSheet(`<h2>⚡ おもいでタイム</h2>
-    <p class="hint">外カメ→インカメの順に撮ってね。撮った写真は<b>今いる場所</b>に、地図のピンとして残ります。</p>
+    <p class="hint">外カメかインカメ、好きな方で1枚撮ってね。撮った写真は<b>今いる場所</b>に、地図のピンとして残ります。</p>
     <div class="rl-img" id="rPrev"><div class="rl-ph">📷 まだ撮っていません</div></div>
     <div class="row">
-      <label class="btn p" id="rBackL">① 外カメで撮る<input type="file" id="rBack" accept="image/*" capture="environment" hidden></label>
-      <label class="btn s" id="rFrontL">② インカメで撮る<input type="file" id="rFront" accept="image/*" capture="user" hidden></label>
+      <label class="btn p" id="rBackL">📷 外カメで撮る<input type="file" id="rBack" accept="image/*" capture="environment" hidden></label>
+      <label class="btn p" id="rFrontL">🤳 インカメで撮る<input type="file" id="rFront" accept="image/*" capture="user" hidden></label>
     </div>
     <label class="f">ひとこと(なくてもOK)</label>
     <input type="text" id="rCap" maxlength="40" placeholder="例：図書館で課題中…">
     <div class="row"><button class="btn s" id="rClose">あとで</button><button class="btn p" id="rPost" disabled>投稿する</button></div>`);
   const prev = ()=>{
-    $("#rPrev").innerHTML = st.back ? `<img class="bk" src="${st.back}" alt="">${st.front?`<img class="fr" src="${st.front}" alt="">`:""}` : `<div class="rl-ph">📷 まだ撮っていません</div>`;
+    $("#rPrev").innerHTML = st.back ? `<img class="bk" src="${st.back}" alt="">` : `<div class="rl-ph">📷 まだ撮っていません</div>`;
     $("#rPost").disabled = !st.back;
-    $("#rBackL").className = "btn " + (st.back ? "s" : "p");
-    $("#rFrontL").className = "btn " + (st.back && !st.front ? "p" : "s");
   };
-  const load = async (input, key, max)=>{
+  // 外カメ・インカメどちらで撮っても1枚だけ(撮り直すと置き換え)
+  const load = async (input)=>{
     const f = input.files && input.files[0]; if(!f) return;
     try{
       const img = await loadImage(f);
-      let data = toDataURL(img, max, false, 0.72);
-      if(key==="back" && data.length > 600000) data = toDataURL(img, 720, false, 0.6);
-      st[key] = data;
-      if(key==="back") st.thumb = toDataURL(img, 140, true, 0.7);
+      let data = toDataURL(img, 1000, false, 0.72);
+      if(data.length > 600000) data = toDataURL(img, 720, false, 0.6);
+      st.back = data; st.front = null;
+      st.thumb = toDataURL(img, 140, true, 0.7);
       prev();
     }catch(_){ toast("写真を読み込めませんでした"); }
   };
-  $("#rBack").addEventListener("change", e=>load(e.target, "back", 1000));
-  $("#rFront").addEventListener("change", e=>load(e.target, "front", 400));
+  $("#rBack").addEventListener("change", e=>load(e.target));
+  $("#rFront").addEventListener("change", e=>load(e.target));
   $("#rClose").onclick = closeSheet;
   $("#rPost").onclick = async ()=>{
     const btn = $("#rPost"); btn.disabled = true; btn.textContent = "場所を確認中…";
