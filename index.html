@@ -49,16 +49,32 @@
     text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;max-width:140px;overflow:hidden;text-overflow:ellipsis}
   .far .mk-label{display:none}
   /* 現在地(whoo風：角丸アイコンの吹き出し＋向きの扇形) */
-  .mepin-in{display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));transform-origin:50% 100%;animation:mepop .35s ease-out}
+  .mepin-in{position:relative;display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));transform-origin:50% 100%;animation:mepop .35s ease-out}
   .mepic{width:72px;height:72px;border-radius:24px;border:4px solid #2f7bff;background:#fff;overflow:hidden;box-sizing:border-box}
   .mepic .avatar{width:100%!important;height:100%!important;border-radius:0!important}
   .metail{width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;border-top:13px solid #2f7bff;margin-top:-2px}
   /* 友達の現在地(白い縁) */
-  .frpin-in{display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 4px 8px rgba(0,0,0,.3));cursor:pointer}
+  .frpin-in{position:relative;display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 4px 8px rgba(0,0,0,.3));cursor:pointer}
   .frpic{width:62px;height:62px;border-radius:21px;border:4px solid #fff;background:#fff;overflow:hidden;box-sizing:border-box}
   .frpic .avatar{width:100%!important;height:100%!important;border-radius:0!important}
   .frtail{width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-top:12px solid #fff;margin-top:-2px}
-  .frago{margin-top:3px;background:#fff;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:800;color:var(--ink);white-space:nowrap}
+  /* ひとこと(インスタのノート風の吹き出し)と名前ラベル */
+  .pnote{position:absolute;bottom:calc(100% + 10px);left:50%;transform:translateX(-50%);background:#fff;color:var(--ink);border-radius:16px;padding:6px 11px;
+    font-size:12px;font-weight:700;line-height:1.35;width:max-content;max-width:150px;text-align:center;word-break:break-all;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+  .pnote:before{content:"";position:absolute;left:22px;bottom:-7px;width:11px;height:11px;border-radius:50%;background:#fff}
+  .pnote:after{content:"";position:absolute;left:16px;bottom:-14px;width:6px;height:6px;border-radius:50%;background:#fff}
+  .plabel{position:absolute;top:calc(100% + 2px);left:50%;transform:translateX(-50%);text-align:center;white-space:nowrap;line-height:1.2;
+    text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff,0 0 3px #fff}
+  .plabel b{display:block;font-size:12px;font-weight:900;color:var(--ink)}
+  .plabel span{font-size:10px;font-weight:700;color:var(--sub)}
+  .prof{text-align:center;padding-top:4px}
+  .prof-av .avatar{border-radius:30px!important;border:4px solid #fff;box-shadow:0 4px 14px rgba(0,0,0,.18)}
+  .prof-name{font-size:22px;font-weight:900;margin-top:10px}
+  .prof-note{display:inline-block;margin-top:8px;background:#f6f1ec;border-radius:16px;padding:8px 14px;font-size:14px;color:var(--ink);max-width:90%}
+  .prof-note small{display:block;font-size:11px;color:var(--sub);margin-top:2px}
+  .prof-note.empty{color:var(--sub)}
+  .prof-row{margin-top:8px;font-size:13px;color:var(--sub)}
+  .member{cursor:pointer}
   .frpin-in.old{opacity:.6}
   .frpin-in.fuzzy .frpic{border-style:dashed}
   .mebase{position:relative;width:200px;height:200px;pointer-events:none}
@@ -304,7 +320,10 @@ function drawMe(){ // 現在地を自分のアイコンで表示(位置はこの
   base.innerHTML = `<div class="mecone"></div><div class="medot"></div>`;
   meBase = new maplibregl.Marker({ element: base, rotationAlignment:"map", pitchAlignment:"map" }).setLngLat(ll).addTo(map);
   const el=document.createElement("div"); // 位置はMapLibreが外側の箱で管理するので、アニメは内側だけに付ける
-  el.innerHTML = `<div class="mepin-in"><div class="mepic">${avatarHTML(myself(), 64)}</div><div class="metail"></div></div>`;
+  const mm = (me && members[me.uid]) || myProfileLS();
+  el.innerHTML = `<div class="mepin-in">${noteActive(mm)?`<div class="pnote">${esc(mm.note)}</div>`:""}<div class="mepic">${avatarHTML(myself(), 64)}</div><div class="metail"></div></div>`;
+  el.style.cursor = "pointer";
+  el.addEventListener("click", e=>{ e.stopPropagation(); if(me && gid) openProfile(me.uid); });
   meMarker = new maplibregl.Marker({ element: el, anchor:"bottom", offset:[0,-6] }).setLngLat(ll).addTo(map);
   applyHeading();
 }
@@ -443,6 +462,7 @@ async function enterGroup(id){
   // 自分をメンバーとして登録(既にいれば名前を更新)
   const mine = { name: me.displayName || "名無し", photo: me.photoURL || "", joinedAt: Date.now() };
   const ic = myIconLS(); if(ic) mine.icon = ic;   // 端末に保存したアイコンをこのグループにも反映
+  const pf = myProfileLS(); for(const k of ["nick","bio","birthday","note","noteAt"]) if(pf[k]!==undefined) mine[k] = pf[k]; // プロフィールも反映
   await setDoc(doc(db,"groups",id,"members",me.uid), mine, { merge:true });
   gid = id; gname = snap.data().name || "おもいでマップ"; gcode = LS.get("omoide.code."+id) || "";
   try{ await setDoc(doc(db,"users",me.uid,"groups",id), { name: gname, joinedAt: Date.now() }, { merge:true }); }catch(_){}
@@ -535,9 +555,10 @@ function drawFriends(){
     if(Date.now() - (L.updatedAt||0) > 24*3600*1000) continue;   // 1日以上前の位置は出さない
     const old = Date.now() - (L.updatedAt||0) > 3600*1000;
     const el = document.createElement("div");
-    el.innerHTML = `<div class="frpin-in${old?" old":""}${L.fuzzy?" fuzzy":""}"><div class="frpic">${avatarHTML(members[id], 54)}</div><div class="frtail"></div><div class="frago">${agoText(L.updatedAt)}${L.fuzzy?"・あいまい":""}</div></div>`;
-    el.addEventListener("click", e=>{ e.stopPropagation(); toast(`${who(id)}：${agoText(L.updatedAt)}${L.fuzzy?"(だいたいの場所)":""}`); });
-    friendMarkers.push(new maplibregl.Marker({ element: el, anchor:"bottom", offset:[0, 16] }).setLngLat([L.lng, L.lat]).addTo(map));
+    const fm = members[id];
+    el.innerHTML = `<div class="frpin-in${old?" old":""}${L.fuzzy?" fuzzy":""}">${noteActive(fm)?`<div class="pnote">${esc(fm.note)}</div>`:""}<div class="frpic">${avatarHTML(fm, 54)}</div><div class="frtail"></div><div class="plabel"><b>${esc(who(id))}</b><span>${agoText(L.updatedAt)}${L.fuzzy?"・あいまい":""}</span></div></div>`;
+    el.addEventListener("click", e=>{ e.stopPropagation(); openProfile(id); });
+    friendMarkers.push(new maplibregl.Marker({ element: el, anchor:"bottom" }).setLngLat([L.lng, L.lat]).addTo(map));
   }
 }
 setInterval(drawFriends, 60000);
@@ -555,6 +576,7 @@ function startListening(){
     members = {}; snap.docs.forEach(d=>members[d.id]=d.data());
     const mine = members[me.uid];
     if(mine && mine.icon && !myIconLS()) LS.set("omoide.icon", JSON.stringify(mine.icon)); // 別の端末で設定したアイコンを引き継ぐ
+    if(mine){ const pf = myProfileLS(); if(!("nick" in pf) && !("bio" in pf) && !("note" in pf)){ const c={}; for(const k of ["nick","bio","birthday","note","noteAt"]) if(mine[k]!==undefined) c[k]=mine[k]; if(Object.keys(c).length) LS.set("omoide.profile", JSON.stringify(c)); } }
     renderAll(); drawMe(); drawFriends();
   }, e=>{}));
   unsubs.push(onSnapshot(collection(db,"groups",gid,"locs"), snap=>{
@@ -565,7 +587,7 @@ function startListening(){
 
 // ---------- 描画 ----------
 const visible = () => spots.filter(s => filter==="all" || (s.genre||"other")===filter);
-const who = id => (members[id] && members[id].name) || "だれか";
+const who = id => (members[id] && (members[id].nick || members[id].name)) || "だれか";
 function renderPill(){
   $("#pill").innerHTML = `🗺️ ${spots.length}ヶ所の記録<small>${esc(gname)}・${Object.keys(members).length}人</small>`;
 }
@@ -617,11 +639,12 @@ async function openDetail(id){
   const mine = me && s.createdBy===me.uid;
   openSheet(`${s.thumb? `<img class="photo" id="dPhoto" src="${esc(s.thumb)}" alt="" style="filter:blur(6px)">`:""}
     <h2 style="margin-top:12px">${g.emoji} ${esc(s.name)}</h2>
-    <div class="meta"><span class="stars" style="font-size:19px">${starStr(s.rating)}</span> また行きたい度<br>${esc(g.label)} ・ ${esc(s.visited||"日付なし")} ・ 記録：${avatarHTML(members[s.createdBy],20)} ${esc(who(s.createdBy))}</div>
+    <div class="meta"><span class="stars" style="font-size:19px">${starStr(s.rating)}</span> また行きたい度<br>${esc(g.label)} ・ ${esc(s.visited||"日付なし")} ・ 記録：<a href="#" id="dWho" style="color:inherit;font-weight:800">${avatarHTML(members[s.createdBy],20)} ${esc(who(s.createdBy))}</a></div>
     ${s.note?`<div class="note">${esc(s.note)}</div>`:""}
     <a class="gm" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.lat+","+s.lng)}" target="_blank" rel="noopener">🗺️ Googleマップで開く</a>
     <div class="row">${mine?`<button class="btn s" id="dEdit">✏️ 編集</button><button class="btn d" id="dDel">🗑️ 削除</button>`:""}<button class="btn s" id="dClose">閉じる</button></div>`);
   $("#dClose").onclick = closeSheet;
+  $("#dWho").onclick = e=>{ e.preventDefault(); openProfile(s.createdBy); };
   if(mine){ $("#dEdit").onclick=()=>openForm(s, {lat:s.lat,lng:s.lng}); $("#dDel").onclick=()=>confirmDelete(s); }
   if(s.hasPhoto){
     try{ const p = await getDoc(doc(db,"groups",gid,"photos",s.id)); const el=$("#dPhoto"); if(el && p.exists()){ el.src=p.data().data; el.style.filter=""; } }
@@ -781,16 +804,102 @@ function openForm(s, pos, st){
   };
 }
 
+// ---------- プロフィール ----------
+// 自分のプロフィールは端末にも保存して、参加している全部のグループに反映する
+function myProfileLS(){ try{ return JSON.parse(LS.get("omoide.profile")||"{}"); }catch(_){ return {}; } }
+const NOTE_MS = 24*3600*1000;
+const noteActive = m => !!(m && m.note && Date.now() - (m.noteAt||0) < NOTE_MS);
+function noteLeft(m){ const h = Math.ceil((NOTE_MS - (Date.now() - (m.noteAt||0))) / 3600000); return h <= 1 ? "あと1時間以内に消えます" : `あと${h}時間で消えます`; }
+function bdayText(b){ const m = /^(\d{2})-(\d{2})$/.exec(b||""); if(!m) return ""; return `${+m[1]}月${+m[2]}日`; }
+function isBdayToday(b){ const d=new Date(); return b === String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+async function saveProfile(fields){
+  const p = Object.assign(myProfileLS(), fields);
+  LS.set("omoide.profile", JSON.stringify(p));
+  const ids = [...new Set([gid, ...Object.keys(myGroups)].filter(Boolean))];
+  await setDoc(doc(db,"groups",gid,"members",me.uid), fields, { merge:true });
+  await Promise.all(ids.filter(g=>g!==gid).map(g=>setDoc(doc(db,"groups",g,"members",me.uid), fields, { merge:true }).catch(()=>{})));
+}
+function openProfile(uid){
+  const m = members[uid] || (uid===me.uid ? { name: me.displayName, photo: me.photoURL, icon: myIconLS(), ...myProfileLS() } : null);
+  if(!m){ toast("このメンバーの情報が見つかりません"); return; }
+  const mine = uid===me.uid;
+  const recs = spots.filter(s=>s.createdBy===uid).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  const L = locs[uid];
+  openSheet(`<div class="prof">
+      <div class="prof-av">${avatarHTML(m, 96)}</div>
+      <div class="prof-name">${esc(m.nick || m.name || "だれか")}</div>
+      ${noteActive(m) ? `<div class="prof-note">${esc(m.note)}<small>${mine ? noteLeft(m) : agoText(m.noteAt)}</small></div>` : (mine ? `<div class="prof-note empty">ひとことはまだありません</div>` : "")}
+      ${m.birthday ? `<div class="prof-row">🎂 ${bdayText(m.birthday)}${isBdayToday(m.birthday) ? "<b>(今日が誕生日🎉)</b>" : ""}</div>` : ""}
+      ${L && uid!==me.uid ? `<div class="prof-row">📍 ${agoText(L.updatedAt)}${L.fuzzy?"(だいたいの場所)":""}</div>` : ""}
+      ${m.bio ? `<div class="note" style="text-align:left">${esc(m.bio)}</div>` : ""}
+    </div>
+    <label class="f">記録したお店(${recs.length}件)</label>
+    <div id="pRecs">${recs.slice(0,3).map(s=>{ const g=G[s.genre]||G.other;
+      return `<button class="item" data-id="${esc(s.id)}">${s.thumb?`<img class="thumb" src="${esc(s.thumb)}" alt="">`:`<div class="thumb" style="background:${g.color}22">${g.emoji}</div>`}
+        <div style="min-width:0"><div class="t">${esc(s.name)}</div><div class="m">${esc(s.visited||"")} ・ ${g.emoji} ${esc(g.label)}</div></div></button>`; }).join("") || `<p class="hint">まだ記録がありません</p>`}</div>
+    ${mine ? `<div class="row"><button class="btn p" id="pNote">💬 ひとことを書く</button><button class="btn s" id="pEdit">✏️ 編集</button></div>` : ""}
+    ${L && uid!==me.uid ? `<div class="row"><button class="btn s" id="pGo">📍 地図で見る</button></div>` : ""}
+    <div class="row"><button class="btn s" id="pClose">閉じる</button></div>`);
+  $("#pClose").onclick = closeSheet;
+  $("#pRecs").addEventListener("click", e=>{ const b=e.target.closest(".item"); if(!b) return; const s=spots.find(x=>x.id===b.dataset.id); closeSheet(); if(s){ setView([s.lat,s.lng], Math.max(map.getZoom(),16)); openDetail(s.id); } });
+  if(L && uid!==me.uid) $("#pGo").onclick = ()=>{ closeSheet(); setView([L.lat, L.lng], Math.max(map.getZoom(),16)); };
+  if(mine){ $("#pNote").onclick = openNoteEditor; $("#pEdit").onclick = openProfileEditor; }
+}
+function openNoteEditor(){
+  const p = members[me.uid] || myProfileLS();
+  openSheet(`<h2>💬 ひとこと</h2>
+    <p class="hint">今思っていることを一言で。地図のアイコンの上に出て、<b>24時間で消えます</b>。いつでも書き直せます。</p>
+    <input type="text" id="nText" maxlength="60" placeholder="例：テスト期間で死にそう" value="${esc(noteActive(p) ? p.note : "")}">
+    <div class="row">${noteActive(p) ? `<button class="btn d" id="nDel">消す</button>` : ""}<button class="btn s" id="nCancel">キャンセル</button><button class="btn p" id="nSave">投稿する</button></div>`);
+  $("#nCancel").onclick = ()=>openProfile(me.uid);
+  $("#nSave").onclick = async ()=>{
+    const t = $("#nText").value.trim(); if(!t){ toast("ひとことを入れてね"); return; }
+    $("#nSave").disabled = true;
+    try{ await saveProfile({ note: t, noteAt: Date.now() }); toast("ひとことを投稿しました"); openProfile(me.uid); }
+    catch(e){ toast(errMsg(e)); $("#nSave").disabled = false; }
+  };
+  if(noteActive(p)) $("#nDel").onclick = async ()=>{
+    try{ await saveProfile({ note: "", noteAt: 0 }); toast("ひとことを消しました"); openProfile(me.uid); }catch(e){ toast(errMsg(e)); }
+  };
+}
+function openProfileEditor(){
+  const p = Object.assign({}, myProfileLS(), members[me.uid] || {});
+  const bd = /^(\d{2})-(\d{2})$/.exec(p.birthday||"");
+  openSheet(`<h2>✏️ プロフィールを編集</h2>
+    <label class="f">ニックネーム</label>
+    <input type="text" id="eNick" maxlength="20" placeholder="${esc(me.displayName||"")}" value="${esc(p.nick||"")}">
+    <div class="hint">空欄ならGoogleの名前が表示されます</div>
+    <label class="f">誕生日(年は保存しません)</label>
+    <div style="display:flex;gap:8px">
+      <select id="eBm" style="flex:1;padding:11px;border-radius:12px;border:1px solid var(--line);font-size:16px;background:#fffdfb"><option value="">月</option>${Array.from({length:12},(_,i)=>`<option value="${String(i+1).padStart(2,"0")}" ${bd&&+bd[1]===i+1?"selected":""}>${i+1}月</option>`).join("")}</select>
+      <select id="eBd" style="flex:1;padding:11px;border-radius:12px;border:1px solid var(--line);font-size:16px;background:#fffdfb"><option value="">日</option>${Array.from({length:31},(_,i)=>`<option value="${String(i+1).padStart(2,"0")}" ${bd&&+bd[2]===i+1?"selected":""}>${i+1}日</option>`).join("")}</select>
+    </div>
+    <label class="f">自己紹介</label>
+    <textarea id="eBio" rows="4" maxlength="200" placeholder="学部・好きな食べ物・よく行く場所 など">${esc(p.bio||"")}</textarea>
+    <div class="row"><button class="btn s" id="eCancel">キャンセル</button><button class="btn p" id="eSave">保存する</button></div>`);
+  $("#eCancel").onclick = ()=>openProfile(me.uid);
+  $("#eSave").onclick = async ()=>{
+    const m=$("#eBm").value, d=$("#eBd").value;
+    if((m && !d) || (!m && d)){ toast("誕生日は月と日の両方を選んでね"); return; }
+    $("#eSave").disabled = true;
+    try{
+      await saveProfile({ nick: $("#eNick").value.trim().slice(0,20), birthday: m&&d ? `${m}-${d}` : "", bio: $("#eBio").value.trim().slice(0,200) });
+      toast("プロフィールを保存しました"); openProfile(me.uid);
+    }catch(e){ toast(errMsg(e)); $("#eSave").disabled = false; }
+  };
+}
+
 // ---------- メンバー・招待 ----------
 $("#bMembers").onclick = ()=>{
   const list = Object.entries(members).sort((a,b)=>(a[1].joinedAt||0)-(b[1].joinedAt||0));
   openSheet(`<h2>👥 ${esc(gname)}</h2>
-    ${list.map(([id,m])=>`<div class="member">${avatarHTML(m,36)}<div>${esc(m.name)}${id===me.uid?"(あなた)":""}<div class="hint" style="margin:0">${spots.filter(s=>s.createdBy===id).length}件の記録</div></div></div>`).join("")}
+    ${list.map(([id,m])=>`<div class="member" data-uid="${esc(id)}">${avatarHTML(m,36)}<div><b>${esc(m.nick||m.name)}</b>${id===me.uid?"(あなた)":""}<div class="hint" style="margin:0">${noteActive(m)?esc(m.note)+" ・ ":""}${spots.filter(s=>s.createdBy===id).length}件の記録</div></div></div>`).join("")}
     <label class="f">友達を招待</label>
     ${gcode ? `<div class="hint">合言葉：<b>${esc(gcode)}</b></div><div class="row"><button class="btn p" id="inv">招待メッセージを送る</button></div>`
             : `<div class="hint">この端末には合言葉が保存されていません。合言葉を知っている人に聞いてね。</div>`}
     <div class="row"><button class="btn s" id="mClose">閉じる</button></div>`);
   $("#mClose").onclick=closeSheet;
+  $("#sheet").querySelectorAll(".member").forEach(r=>r.onclick=()=>openProfile(r.dataset.uid));
   if(gcode) $("#inv").onclick=async()=>{
     const text = `おもいでマップ「${gname}」に参加してね！\n${location.origin+location.pathname}\n合言葉：${gcode}\n(LINEで開いたら「ブラウザで開く」を選んでね)`;
     try{ if(navigator.share){ await navigator.share({ text }); return; } }catch(_){ return; }
@@ -801,6 +910,7 @@ $("#bMembers").onclick = ()=>{
 // ---------- 設定 ----------
 $("#bSettings").onclick = ()=>{
   openSheet(`<h2>⚙️ 設定</h2>
+    <div class="row" style="margin-top:0"><button class="btn p" id="sProfile">👤 自分のプロフィール</button></div>
     <label class="f">アイコン(グループのみんなに表示されます)</label>
     <div style="display:flex;align-items:center;gap:14px">
       <span id="icPrev">${avatarHTML(myself(),72)}</span>
@@ -826,8 +936,9 @@ $("#bSettings").onclick = ()=>{
     <p class="hint" style="margin-top:16px">地図：© OpenStreetMap contributors © OpenFreeMap</p>
     <div class="row"><button class="btn s" id="sClose">閉じる</button></div>`);
   $("#sClose").onclick=closeSheet;
+  $("#sProfile").onclick=()=>openProfile(me.uid);
   $("#sSwitch").onclick=()=>openGroupSheet();
-  $("#sOut").onclick=async ()=>{ closeSheet(); await clearMyLocs(); LS.del("omoide.gid"); LS.del("omoide.icon"); LS.del("omoide.share"); signOut(auth); };
+  $("#sOut").onclick=async ()=>{ closeSheet(); await clearMyLocs(); LS.del("omoide.gid"); LS.del("omoide.icon"); LS.del("omoide.share"); LS.del("omoide.profile"); signOut(auth); };
 
   const markShare = ()=>[...$("#shareSeg").children].forEach(b=>b.classList.toggle("on", b.dataset.v===shareMode()));
   markShare();
