@@ -6,8 +6,8 @@
 <meta name="theme-color" content="#ff6b4a">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>おもいでマップ</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <style>
   :root{ --accent:#ff6b4a; --accent2:#ffb03b; --ink:#1f1a17; --sub:#7a6e66; --line:#eee3d8; --bg:#fff8f0; --ok:#2bb673;
     --st:env(safe-area-inset-top,0px); --sb:env(safe-area-inset-bottom,0px); }
@@ -49,7 +49,7 @@
     text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;max-width:140px;overflow:hidden;text-overflow:ellipsis}
   .far .mk-label{display:none}
   .me{width:20px;height:20px;border-radius:50%;background:#2f7bff;border:3px solid #fff;box-shadow:0 0 0 6px rgba(47,123,255,.25)}
-  .leaflet-div-icon{background:none;border:none}
+  .mk{cursor:pointer}
 
   /* 位置決めモード */
   #pick{position:fixed;inset:0;z-index:600;pointer-events:none;display:none}
@@ -102,7 +102,8 @@
 
   .toast{position:fixed;left:50%;bottom:calc(var(--sb) + 110px);transform:translateX(-50%);background:#111;color:#fff;padding:11px 16px;
     border-radius:12px;font-size:14px;z-index:2000;display:none;max-width:90%;text-align:center}
-  .leaflet-control-attribution{font-size:9px}
+  .maplibregl-ctrl-attrib{font-size:9px}
+  .maplibregl-ctrl-bottom-right{bottom:calc(var(--sb) + 0px)}
 </style>
 </head>
 <body>
@@ -197,14 +198,39 @@ $("#ov").addEventListener("click", e=>{ if(e.target.id==="ov") closeSheet(); });
 function setMainUI(on){ ["#topUI","#sideUI","#bottomUI"].forEach(s=>$(s).style.display = on ? "" : "none"); }
 
 // ---------- 地図 ----------
-const map = L.map("map", { zoomControl:false, attributionControl:true }).setView(DEFAULT_CENTER, 14);
-L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-  maxZoom: 20, subdomains: "abcd",
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-}).addTo(map);
-const markers = L.layerGroup().addTo(map);
+const map = new maplibregl.Map({
+  container: "map",
+  style: "https://tiles.openfreemap.org/styles/liberty",
+  center: [DEFAULT_CENTER[1], DEFAULT_CENTER[0]], zoom: 14,
+  attributionControl: { compact: true },
+  dragRotate: false, pitchWithRotate: false
+});
+map.touchZoomRotate.disableRotation();
+// 地図の文字を日本語(現地名)で表示
+map.on("load", ()=>{
+  for(const ly of map.getStyle().layers){
+    if(ly.type!=="symbol" || !ly.layout || !ly.layout["text-field"]) continue;
+    if(!JSON.stringify(ly.layout["text-field"]).includes("name")) continue;
+    try{ map.setLayoutProperty(ly.id, "text-field", ["coalesce", ["get","name:ja"], ["get","name"]]); }catch(_){}
+  }
+});
+// Leafletと同じ感覚で使えるようにする小道具([緯度,経度]で受け取る)
+function setView(ll, z){ map.jumpTo({ center:[ll[1], ll[0]], zoom: z }); }
+function fitTo(pts){
+  if(pts.length===1){ setView([pts[0].lat, pts[0].lng], 16); return; }
+  const b = new maplibregl.LngLatBounds();
+  pts.forEach(s=>b.extend([s.lng, s.lat]));
+  map.fitBounds(b, { padding: 70, maxZoom: 16, duration: 0 });
+}
+function distM(a, b){ // 2点間の距離(m)
+  const R=6371000, r=x=>x*Math.PI/180;
+  const dLat=r(b.lat-a.lat), dLng=r(b.lng-a.lng);
+  const h=Math.sin(dLat/2)**2 + Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+let markerObjs = [];
 function updateFar(){ $("#map").classList.toggle("far", map.getZoom() < 15); }
-map.on("zoomend", updateFar); updateFar();
+map.on("zoom", updateFar); updateFar();
 
 let meMarker = null, myPos = null, watchId = null;
 function startLocate(pan){
@@ -212,13 +238,13 @@ function startLocate(pan){
   if(watchId===null){
     watchId = navigator.geolocation.watchPosition(p=>{
       myPos = [p.coords.latitude, p.coords.longitude];
-      if(!meMarker) meMarker = L.marker(myPos, {icon:L.divIcon({className:"", html:'<div class="me"></div>', iconSize:[20,20], iconAnchor:[10,10]}), interactive:false, zIndexOffset:1000}).addTo(map);
-      else meMarker.setLatLng(myPos);
-      if(pendingPan){ map.setView(myPos, Math.max(map.getZoom(),16)); pendingPan=false; }
+      if(!meMarker){ const el=document.createElement("div"); el.className="me"; meMarker = new maplibregl.Marker({ element: el }).setLngLat([myPos[1], myPos[0]]).addTo(map); }
+      else meMarker.setLngLat([myPos[1], myPos[0]]);
+      if(pendingPan){ setView(myPos, Math.max(map.getZoom(),16)); pendingPan=false; }
     }, err=>{ toast(err.code===1 ? "位置情報の利用が許可されていません(ブラウザの設定を確認してね)" : "現在地を取得できませんでした"); pendingPan=false; },
     { enableHighAccuracy:true, maximumAge:15000, timeout:20000 });
   }
-  if(pan){ if(myPos){ map.setView(myPos, Math.max(map.getZoom(),16)); } else { pendingPan=true; } }
+  if(pan){ if(myPos){ setView(myPos, Math.max(map.getZoom(),16)); } else { pendingPan=true; } }
 }
 let pendingPan = false;
 $("#bLocate").onclick = ()=>startLocate(true);
@@ -320,7 +346,8 @@ async function enterGroup(id){
   LS.set("omoide.gid", id);
   hideScreen(); setMainUI(true); startListening();
 }
-function stopListening(){ unsubs.forEach(f=>{try{f()}catch(_){}}); unsubs=[]; spots=[]; members={}; markers.clearLayers(); }
+function stopListening(){ unsubs.forEach(f=>{try{f()}catch(_){}}); unsubs=[]; spots=[]; members={}; clearMarkers(); }
+function clearMarkers(){ markerObjs.forEach(m=>m.remove()); markerObjs=[]; }
 let firstFit = true;
 function startListening(){
   stopListening(); firstFit = true;
@@ -345,24 +372,22 @@ function renderChips(){
   const items=[{k:"all",label:"すべて",emoji:"✨"}].concat(GENRES.filter(g=>cnt[g.k]));
   $("#chips").innerHTML = items.length>2 || filter!=="all" ? items.map(g=>`<button class="chip ${filter===g.k?"on":""}" data-k="${g.k}">${g.emoji} ${esc(g.label)}</button>`).join("") : "";
 }
-$("#pill").onclick = ()=>{ const pts=visible().filter(s=>typeof s.lat==="number"); if(pts.length) map.fitBounds(L.latLngBounds(pts.map(s=>[s.lat,s.lng])), {padding:[60,60], maxZoom:16}); };
+$("#pill").onclick = ()=>{ const pts=visible().filter(s=>typeof s.lat==="number"); if(pts.length) fitTo(pts); };
 $("#chips").addEventListener("click", e=>{ const b=e.target.closest(".chip"); if(!b) return; filter=b.dataset.k; renderAll(); });
-function markerIcon(s){
+function markerEl(s){
   const g = G[s.genre]||G.other;
   const inner = s.thumb ? `<img src="${esc(s.thumb)}" alt="">` : g.emoji;
-  return L.divIcon({ className:"", iconSize:[52,60], iconAnchor:[26,52],
-    html:`<div class="mk" style="--c:${g.color}"><div class="mk-tail"></div><div class="mk-in">${inner}</div>${s.thumb?`<div class="mk-badge">${g.emoji}</div>`:""}<div class="mk-label">${esc(s.name)}</div></div>` });
+  const el = document.createElement("div");  // MapLibreが位置を管理する外側の箱
+  el.innerHTML = `<div class="mk" style="--c:${g.color}"><div class="mk-tail"></div><div class="mk-in">${inner}</div>${s.thumb?`<div class="mk-badge">${g.emoji}</div>`:""}<div class="mk-label">${esc(s.name)}</div></div>`;
+  el.addEventListener("click", e=>{ e.stopPropagation(); openDetail(s.id); });
+  return el;
 }
 function renderAll(){
   renderPill(); renderChips();
-  markers.clearLayers();
+  clearMarkers();
   const pts = visible().filter(s=>typeof s.lat==="number" && typeof s.lng==="number");
-  pts.forEach(s=>{ L.marker([s.lat,s.lng], {icon:markerIcon(s)}).on("click", ()=>openDetail(s.id)).addTo(markers); });
-  if(firstFit && pts.length){
-    firstFit=false;
-    if(pts.length===1) map.setView([pts[0].lat,pts[0].lng], 16);
-    else map.fitBounds(L.latLngBounds(pts.map(s=>[s.lat,s.lng])), {padding:[60,60], maxZoom:16});
-  }
+  pts.forEach(s=>{ markerObjs.push(new maplibregl.Marker({ element: markerEl(s), anchor:"top-left", offset:[-26,-52] }).setLngLat([s.lng, s.lat]).addTo(map)); });
+  if(firstFit && pts.length){ firstFit=false; fitTo(pts); }
 }
 
 // ---------- 一覧 ----------
@@ -379,7 +404,7 @@ $("#bList").onclick = ()=>{
       : `<p class="hint" style="text-align:center;margin:30px 0">${spots.length?"該当する記録がありません":"まだ記録がありません。下の＋から追加しよう"}</p>`;
   };
   $("#q").addEventListener("input", draw);
-  $("#items").addEventListener("click", e=>{ const b=e.target.closest(".item"); if(!b) return; const s=spots.find(x=>x.id===b.dataset.id); closeSheet(); if(s){ map.setView([s.lat,s.lng], Math.max(map.getZoom(),16)); openDetail(s.id); } });
+  $("#items").addEventListener("click", e=>{ const b=e.target.closest(".item"); if(!b) return; const s=spots.find(x=>x.id===b.dataset.id); closeSheet(); if(s){ setView([s.lat,s.lng], Math.max(map.getZoom(),16)); openDetail(s.id); } });
   draw();
 };
 
@@ -420,8 +445,8 @@ let pickCb = null;
 function startPick(cb, at){
   pickCb = cb; closeSheet();
   setMainUI(false); $("#pick").style.display="block";
-  if(at) map.setView([at.lat,at.lng], Math.max(map.getZoom(),17));
-  else if(myPos) map.setView(myPos, Math.max(map.getZoom(),17));
+  if(at) setView([at.lat,at.lng], Math.max(map.getZoom(),17));
+  else if(myPos) setView(myPos, Math.max(map.getZoom(),17));
   else startLocate(true);
 }
 function endPick(){ $("#pick").style.display="none"; setMainUI(true); }
@@ -518,7 +543,7 @@ function openForm(s, pos, st){
     try{
       exifPos = readExifGps(await file.slice(0,256*1024).arrayBuffer());
       if(exifPos){
-        const d = map.distance([exifPos.lat,exifPos.lng],[f.pos.lat,f.pos.lng]);
+        const d = distM(exifPos, f.pos);
         if(d>30){
           $("#fPhotoMsg").innerHTML = `写真の撮影場所が、選んだ位置から約${Math.round(d)}m離れています。<button type="button" class="btn s" id="useExif" style="margin-top:6px;width:100%">写真の場所を使う</button>`;
           $("#useExif").onclick=()=>{ f.pos=exifPos; $("#fPosMsg").textContent="📍 写真の撮影場所"; $("#fPhotoMsg").textContent="✓ 写真の場所を使います"; };
