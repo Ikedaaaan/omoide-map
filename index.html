@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#ff6b4a">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>おもいでマップ</title>
+<title>ashiart</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<meta name="apple-mobile-web-app-title" content="おもいで">
+<meta name="apple-mobile-web-app-title" content="ashiart">
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <style>
@@ -205,7 +205,7 @@
 <div id="map"></div>
 
 <div class="top" id="topUI" style="display:none">
-  <button class="pill" id="pill">📍 おもいでマップ</button>
+  <button class="pill" id="pill">👣 ashiart</button>
   <div class="chips" id="chips"></div>
 </div>
 <div class="side" id="sideUI" style="display:none">
@@ -470,7 +470,7 @@ const configured = !Object.values(firebaseConfig).some(v => String(v).includes("
 if(!configured){
   showScreen(`<h1>🔧 設定がまだです</h1><p>index.html の上のほうにある <b>firebaseConfig</b> に、Firebaseの設定を貼り付けてください。</p>`);
 } else if(inApp){
-  showScreen(`<h1>📍 おもいでマップ</h1>
+  showScreen(`<h1>👣 ashiart</h1>
     <p>LINEなどのアプリ内ブラウザではGoogleログインができません。<br>右上(または右下)のメニューから<b>「Safariで開く」「ブラウザで開く」</b>を選んでね。</p>
     <div class="row"><button class="btn s" id="cpUrl">URLをコピー</button></div>`);
   $("#cpUrl").onclick = async ()=>{ try{ await navigator.clipboard.writeText(location.href); toast("コピーしました"); }catch(_){ toast(location.href); } };
@@ -491,7 +491,7 @@ if(!configured){
 
 // ---------- ログイン ----------
 function showLogin(){
-  showScreen(`<h1>📍 おもいでマップ</h1>
+  showScreen(`<h1>👣 ashiart</h1>
     <p>友達と行ったお店を、写真つきで地図に残していこう。</p>
     <div class="row"><button class="btn k" id="gLogin">Googleでログイン</button></div>`);
   $("#gLogin").onclick = async ()=>{
@@ -536,7 +536,7 @@ function showGroupScreen(backTo){
         const snap = await getDoc(ref);
         if(mode==="create"){
           if(snap.exists()){ toast("その合言葉はもう使われています。別の言葉にしてね"); btn.disabled=false; return; }
-          const name = ($("#gName").value.trim() || "おもいでマップ").slice(0,30);
+          const name = ($("#gName").value.trim() || "ashiart").slice(0,30);
           await setDoc(ref, { name, createdBy: me.uid, createdAt: Date.now() });
         } else if(!snap.exists()){
           toast("その合言葉のグループが見つかりません"); btn.disabled=false; return;
@@ -556,7 +556,7 @@ async function enterGroup(id){
   const ic = myIconLS(); if(ic) mine.icon = ic;   // 端末に保存したアイコンをこのグループにも反映
   const pf = myProfileLS(); for(const k of ["nick","bio","birthday","note","noteAt"]) if(pf[k]!==undefined) mine[k] = pf[k]; // プロフィールも反映
   await setDoc(doc(db,"groups",id,"members",me.uid), mine, { merge:true });
-  gid = id; gname = snap.data().name || "おもいでマップ"; gcode = LS.get("omoide.code."+id) || "";
+  gid = id; gname = snap.data().name || "ashiart"; gcode = LS.get("omoide.code."+id) || "";
   try{ await setDoc(doc(db,"users",me.uid,"groups",id), { name: gname, joinedAt: Date.now() }, { merge:true }); }catch(_){}
   LS.set("omoide.gid", id);
   hideScreen(); setMainUI(true); startListening();
@@ -582,7 +582,7 @@ function openGroupSheet(){
   if(gid && !myGroups[gid]) list.unshift([gid, { name: gname }]);
   openSheet(`<h2>👥 グループを切り替える</h2>
     ${list.map(([id,g])=>`<div class="grow${id===gid?" cur":""}">
-      <button class="gname" data-id="${esc(id)}">${esc(g.name||"おもいでマップ")}<small>${id===gid?"いま表示中":"タップで切り替え"}</small></button>
+      <button class="gname" data-id="${esc(id)}">${esc(g.name||"ashiart")}<small>${id===gid?"いま表示中":"タップで切り替え"}</small></button>
       <button class="gleave" data-leave="${esc(id)}">抜ける</button></div>`).join("")}
     <div class="row"><button class="btn p" id="gAdd">＋ 新しいグループに参加/作成</button></div>
     <div class="row"><button class="btn s" id="gFit">📍 このグループの記録を全部表示</button><button class="btn s" id="gClose">閉じる</button></div>`);
@@ -1466,7 +1466,7 @@ $("#bMembers").onclick = ()=>{
   $("#mClose").onclick=closeSheet;
   $("#sheet").querySelectorAll(".member").forEach(r=>r.onclick=()=>openProfile(r.dataset.uid));
   if(gcode) $("#inv").onclick=async()=>{
-    const text = `おもいでマップ「${gname}」に参加してね！\n${location.origin+location.pathname}\n合言葉：${gcode}\n(LINEで開いたら「ブラウザで開く」を選んでね)`;
+    const text = `ashiart「${gname}」に参加してね！\n${location.origin+location.pathname}\n合言葉：${gcode}\n(LINEで開いたら「ブラウザで開く」を選んでね)`;
     try{ if(navigator.share){ await navigator.share({ text }); return; } }catch(_){ return; }
     try{ await navigator.clipboard.writeText(text); toast("招待メッセージをコピーしました"); }catch(_){ toast("コピーできませんでした"); }
   };
