@@ -116,6 +116,16 @@
   #vImg{max-width:100%;max-height:100%;object-fit:contain}
   #vPrev,#vNext{position:absolute;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;border:none;background:rgba(255,255,255,.25);color:#fff;font-size:22px}
   #vPrev{left:8px} #vNext{right:8px}
+  /* 足あとモード */
+  #bFoot.on{background:var(--accent);color:#fff}
+  #footPanel{position:fixed;left:12px;top:calc(var(--st) + 110px);z-index:500;background:rgba(255,255,255,.95);border-radius:16px;padding:10px 12px;box-shadow:0 4px 14px rgba(0,0,0,.15);max-width:58%;display:none;font-size:13px}
+  #footPanel.show{display:block}
+  #footPanel b{font-size:14px}
+  .fp-sub{color:#8a7d72;font-size:11px;margin:2px 0 4px}
+  .fp-row{display:flex;align-items:center;gap:6px;margin-top:3px}
+  .fp-dot{width:12px;height:12px;border-radius:50%;flex:none}
+  .fp-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fp-n{font-weight:800}
   /* おもいでタイムの振り返り(メモリーズ風) */
   #rhist{position:fixed;inset:0;z-index:880;background:#000;color:#fff;display:none;flex-direction:column}
   #rhist.show{display:flex}
@@ -225,6 +235,7 @@
   <button class="sbtn" id="bMembers" title="メンバー・招待">👥</button>
   <button class="sbtn" id="bSettings" title="設定">⚙️</button>
   <button class="sbtn" id="bCompass" title="向きを表示">🧭</button>
+  <button class="sbtn" id="bFoot" title="足あとモード">👣</button>
   <button class="sbtn" id="bReal" title="おもいでタイム">📸<span class="rdot" id="rDot"></span></button>
 </div>
 <div class="bottom" id="bottomUI" style="display:none">
@@ -246,6 +257,7 @@
 <div class="ov" id="ov"><div class="sheet" id="sheet"></div></div>
 <div class="screen" id="screen"><div class="card" id="card"></div></div>
 <div class="toast" id="toast"></div>
+<div id="footPanel"></div>
 <div id="rhist"><div class="rh-top"><b>⚡ これまでのおもいでタイム</b><button class="rh-x" id="rhClose">✕</button></div><div class="rh-body" id="rhBody"></div></div>
 <div id="viewer"><div class="vtop"><div id="vInfo"></div><button class="vbtn" id="vDel">🗑️</button><button class="vbtn" id="vClose">✕</button></div><div class="vmid"><img id="vImg" alt=""><button id="vPrev">‹</button><button id="vNext">›</button></div></div>
 <div id="realBar"><b id="realText"></b><button id="realShoot">撮る</button></div>
@@ -269,7 +281,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getMessaging, getToken, onMessage, isSupported } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
-import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, onSnapshot, query, where, getDocs }
+import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, onSnapshot, query, where, getDocs, arrayUnion }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // ---------- 定数・小道具 ----------
@@ -409,6 +421,7 @@ function startLocate(pan){
       if(!meMarker) drawMe();
       else moveMe();
       sendLoc(false);
+      recordTrail(p.coords.latitude, p.coords.longitude, p.coords.accuracy);
       if(pendingPan){ setView(myPos, Math.max(map.getZoom(),16)); pendingPan=false; }
     }, err=>{ toast(err.code===1 ? "位置情報の利用が許可されていません(ブラウザの設定を確認してね)" : "現在地を取得できませんでした"); pendingPan=false; },
     { enableHighAccuracy:true, maximumAge:15000, timeout:20000 });
@@ -670,7 +683,7 @@ function drawFriends(){
 }
 setInterval(drawFriends, 60000);
 document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) sendLoc(true); });
-function stopListening(){ unsubs.forEach(f=>{try{f()}catch(_){}}); unsubs=[]; spots=[]; members={}; locs={}; reals={}; customGenres=[]; applyGenres(); clearMarkers(); drawFriends(); drawReals(); }
+function stopListening(){ unsubs.forEach(f=>{try{f()}catch(_){}}); unsubs=[]; spots=[]; members={}; locs={}; reals={}; trails={}; customGenres=[]; applyGenres(); clearMarkers(); drawFriends(); drawReals(); }
 function clearMarkers(){ markerObjs.forEach(m=>m.remove()); markerObjs=[]; }
 let firstFit = true;
 function startListening(){
@@ -695,11 +708,15 @@ function startListening(){
       .map((x,i)=>({ k:"c_"+x.id, label:String(x.label||"").slice(0,12), emoji:cleanEmoji(x.emoji), color: GENRE_COLORS[i % GENRE_COLORS.length], createdBy:x.createdBy }));
     applyGenres(); renderAll();
   }, e=>{}));
+  unsubs.push(onSnapshot(collection(db,"groups",gid,"trail"), snap=>{
+    trails = {}; snap.docs.forEach(d=>trails[d.id]=d.data());
+    updateFoot();
+  }, e=>{}));
   let realsFirst = true;
   unsubs.push(onSnapshot(collection(db,"groups",gid,"reals"), snap=>{
     const before = reals;
     reals = {}; snap.docs.forEach(d=>reals[d.id]={ id:d.id, ...d.data() });
-    drawReals(); updateRealUI();
+    drawReals(); updateRealUI(); updateFoot();
     // 友達の新しい投稿をお知らせ & 開いている画面をその場で更新
     if(!realsFirst){
       const fresh = Object.values(reals).filter(r=>!before[r.id] && me && r.uid!==me.uid && r.date===jstDate());
@@ -733,7 +750,7 @@ function markerEl(s){
   return el;
 }
 function renderAll(){
-  renderPill(); renderChips(); drawReals();
+  renderPill(); renderChips(); drawReals(); updateFoot();
   clearMarkers();
   const pts = visible().filter(s=>typeof s.lat==="number" && typeof s.lng==="number");
   pts.forEach(s=>{ markerObjs.push(new maplibregl.Marker({ element: markerEl(s), anchor:"top-left", offset:[-26,-52] }).setLngLat([s.lng, s.lat]).addTo(map)); });
@@ -1066,6 +1083,75 @@ function impStep(keep){
     }catch(e){ toast(errMsg(e)); busy(false); $("#impSave").textContent = "新しく作って保存"; }
   };
 }
+
+// ---------- 👣 足あとモード(行った場所・歩いた道で地図を塗る) ----------
+const FOOT_CELL = 0.0005;   // 約50mのマス
+const FOOT_COLORS = ["#ff6b4a","#2f7bff","#2bb673","#a855f7","#ffb03b","#f43f5e","#14b8a6","#6366f1"];
+let trails = {}, footOn = false, myTrailCells = new Set(), myTrailDay = null;
+const trailOn = () => LS.get("omoide.trail") !== "off";
+function memberColor(uid){
+  const ic = members[uid] && members[uid].icon;
+  if(ic && ic.color && /^#[0-9a-fA-F]{6}$/.test(ic.color)) return ic.color;
+  let h = 0; for(const c of String(uid)) h = (h*31 + c.charCodeAt(0)) >>> 0;
+  return FOOT_COLORS[h % FOOT_COLORS.length];
+}
+const cellKey = (lat,lng) => (Math.round(lat/FOOT_CELL)*FOOT_CELL).toFixed(4) + "," + (Math.round(lng/FOOT_CELL)*FOOT_CELL).toFixed(4);
+// アプリを開いている間、新しいマスに入ったら記録する(参加中の全グループ)
+async function recordTrail(lat, lng, acc){
+  if(!me || !gid || !trailOn() || (acc && acc > 80)) return;
+  const d = jstDate(); if(d !== myTrailDay){ myTrailDay = d; myTrailCells = new Set(); }
+  const k = cellKey(lat, lng); if(myTrailCells.has(k)) return; myTrailCells.add(k);
+  for(const g of allGroupIds()){
+    try{ await setDoc(doc(db,"groups",g,"trail",me.uid+"_"+d), { uid: me.uid, date: d, pts: arrayUnion(k), updatedAt: Date.now() }, { merge: true }); }catch(_){}
+  }
+}
+function footFeatures(){
+  const f = [];
+  const add = (uid, lat, lng)=>{ if(typeof lat==="number" && typeof lng==="number" && isFinite(lat) && isFinite(lng)) f.push({ type:"Feature", properties:{ c: memberColor(uid) }, geometry:{ type:"Point", coordinates:[lng, lat] } }); };
+  for(const t of Object.values(trails)) for(const k of (t.pts||[])){ const [a,b] = String(k).split(",").map(Number); add(t.uid, a, b); }
+  spots.forEach(s=>add(s.createdBy, s.lat, s.lng));
+  Object.values(reals).forEach(r=>add(r.uid, r.lat, r.lng));
+  return { type:"FeatureCollection", features:f };
+}
+function ensureFootLayers(){
+  if(!map.isStyleLoaded()) return false;
+  if(!map.getSource("foot")){
+    map.addSource("fog", { type:"geojson", data:{ type:"Feature", properties:{}, geometry:{ type:"Polygon", coordinates:[[[-180,-85],[180,-85],[180,85],[-180,85],[-180,-85]]] } } });
+    map.addSource("foot", { type:"geojson", data: footFeatures() });
+    map.addLayer({ id:"fog", type:"fill", source:"fog", layout:{ visibility:"none" }, paint:{ "fill-color":"#fff8ef", "fill-opacity":0.62 } });
+    map.addLayer({ id:"foot", type:"circle", source:"foot", layout:{ visibility:"none" }, paint:{
+      "circle-color":["get","c"], "circle-opacity":0.3, "circle-blur":0.55,
+      "circle-radius":["interpolate",["exponential",2],["zoom"], 8,0.4, 20,1700] } });   // 半径およそ100m
+  }
+  return true;
+}
+function updateFoot(){
+  if(!footOn) return;
+  const src = map.getSource("foot"); if(src) src.setData(footFeatures());
+  updateFootPanel();
+}
+function updateFootPanel(){
+  const el = $("#footPanel"); if(!el || !footOn) return;
+  const all = {}, month = {}; const m = jstDate().slice(0,7);
+  const put = (o,u,k)=>{ (o[u] = o[u] || new Set()).add(k); };
+  for(const t of Object.values(trails)) for(const k of (t.pts||[])){ put(all, t.uid, k); if((t.date||"").startsWith(m)) put(month, t.uid, k); }
+  spots.forEach(s=>put(all, s.createdBy, cellKey(s.lat,s.lng)));
+  Object.values(reals).forEach(r=>put(all, r.uid, cellKey(r.lat,r.lng)));
+  const n = (o,u)=>o[u] ? o[u].size : 0;
+  const uids = Object.keys(members).sort((a,b)=>n(all,b)-n(all,a));
+  el.innerHTML = `<b>👣 足あとモード</b><div class="fp-sub">今月の自分：${n(month, me && me.uid)}マス</div>`
+    + uids.map(u=>`<div class="fp-row"><span class="fp-dot" style="background:${memberColor(u)}"></span><span class="fp-name">${esc(who(u))}</span><span class="fp-n">${n(all,u)}</span></div>`).join("")
+    + `<div class="fp-sub">${trailOn() ? "歩いた道とお店の周りが色付きます" : "歩いた道の記録はオフ(⚙️で変更)"}</div>`;
+}
+function setFoot(on){
+  footOn = on;
+  if(!ensureFootLayers()){ map.once("idle", ()=>setFoot(footOn)); return; }
+  ["fog","foot"].forEach(id=>map.setLayoutProperty(id, "visibility", on ? "visible" : "none"));
+  $("#bFoot").classList.toggle("on", on);
+  $("#footPanel").classList.toggle("show", on);
+  if(on){ updateFoot(); if(map.getZoom() > 15) map.easeTo({ zoom: 14 }); }
+}
+$("#bFoot").onclick = ()=>setFoot(!footOn);
 
 // ---------- 記録フォーム ----------
 function openForm(s, pos, st){
@@ -1514,6 +1600,9 @@ $("#bSettings").onclick = ()=>{
     ${isIOS && !isStandalone() ? "" : `<div class="row" style="margin-top:8px"><button class="btn s" id="sPush">通知をオンにする</button></div>`}
     <label class="f">🏷️ グループのジャンル</label>
     <div id="sGenres">${customGenres.length ? customGenres.map(g=>`<div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span style="flex:1">${esc(g.emoji)} ${esc(g.label)}</span>${g.createdBy===me.uid?`<button type="button" class="btn s" data-del="${esc(g.k)}" style="padding:6px 10px">削除</button>`:""}</div>`).join("") : `<div class="hint">まだありません。記録するときの「＋ 新しいジャンル」から追加できます。</div>`}</div>
+    <label class="f">👣 歩いた道を足あとに残す</label>
+    <div class="tabs2" id="trailSeg" style="margin-top:0"><button data-v="on">残す</button><button data-v="off">残さない</button></div>
+    <div class="hint">アプリを開いている間に歩いた場所(約50mごと)を、参加しているグループの「足あとモード」に色として残します。</div>
     <label class="f">現在地の共有</label>
     <div class="tabs2" id="shareSeg" style="margin-top:0">
       <button data-v="off">共有しない</button><button data-v="on">共有する</button><button data-v="fuzzy">あいまい</button>
@@ -1535,6 +1624,9 @@ $("#bSettings").onclick = ()=>{
     try{ await deleteDoc(doc(db,"groups",gid,"genres",g.k.slice(2))); b.parentElement.remove(); toast("削除しました"); }catch(err){ toast(errMsg(err)); }
   };
   if($("#sPush")) $("#sPush").onclick = async ()=>{ await enablePush(); const el=$("#pushStat"); if(el) el.textContent = pushStatusText(); };
+  const markTrail = ()=>[...$("#trailSeg").children].forEach(b=>b.classList.toggle("on", b.dataset.v===(trailOn()?"on":"off")));
+  markTrail();
+  $("#trailSeg").onclick = e=>{ const b=e.target.closest("button"); if(!b) return; LS.set("omoide.trail", b.dataset.v); markTrail(); updateFootPanel(); };
   const markShare = ()=>[...$("#shareSeg").children].forEach(b=>b.classList.toggle("on", b.dataset.v===shareMode()));
   markShare();
   $("#shareSeg").onclick = async e=>{
