@@ -1,6 +1,6 @@
 {
-  "name": "おもいでマップ",
-  "short_name": "おもいで",
+  "name": "ashiart",
+  "short_name": "ashiart",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
