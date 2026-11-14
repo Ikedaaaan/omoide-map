@@ -1113,8 +1113,10 @@ function footFeatures(){
   Object.values(reals).forEach(r=>add(r.uid, r.lat, r.lng));
   return { type:"FeatureCollection", features:f };
 }
+let mapReady = !!(map.style && map.style._loaded);
+map.on("load", ()=>{ mapReady = true; if(footOn) setFoot(true); });
 function ensureFootLayers(){
-  if(!map.isStyleLoaded()) return false;
+  if(!mapReady) return false;
   if(!map.getSource("foot")){
     map.addSource("fog", { type:"geojson", data:{ type:"Feature", properties:{}, geometry:{ type:"Polygon", coordinates:[[[-180,-85],[180,-85],[180,85],[-180,85],[-180,-85]]] } } });
     map.addSource("foot", { type:"geojson", data: footFeatures() });
@@ -1145,10 +1147,10 @@ function updateFootPanel(){
 }
 function setFoot(on){
   footOn = on;
-  if(!ensureFootLayers()){ map.once("idle", ()=>setFoot(footOn)); return; }
-  ["fog","foot"].forEach(id=>map.setLayoutProperty(id, "visibility", on ? "visible" : "none"));
   $("#bFoot").classList.toggle("on", on);
   $("#footPanel").classList.toggle("show", on);
+  if(!ensureFootLayers()) return;   // 地図の準備ができたら load で続きをやる
+  ["fog","foot"].forEach(id=>map.setLayoutProperty(id, "visibility", on ? "visible" : "none"));
   if(on){ updateFoot(); if(map.getZoom() > 15) map.easeTo({ zoom: 14 }); }
 }
 $("#bFoot").onclick = ()=>setFoot(!footOn);
