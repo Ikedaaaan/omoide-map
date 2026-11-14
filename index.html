@@ -116,6 +116,9 @@
   #vImg{max-width:100%;max-height:100%;object-fit:contain}
   #vPrev,#vNext{position:absolute;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;border:none;background:rgba(255,255,255,.25);color:#fff;font-size:22px}
   #vPrev{left:8px} #vNext{right:8px}
+  /* 置き手紙 */
+  .ltr{position:relative;width:44px;height:44px;border-radius:50%;background:#fff;border:3px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 3px 10px rgba(0,0,0,.3);cursor:pointer}
+  .ltr.open{border-color:#c9bcae;opacity:.85}
   /* 足あとモード */
   #bFoot.on{background:var(--accent);color:#fff}
   #footPanel{position:fixed;left:12px;top:calc(var(--st) + 110px);z-index:500;background:rgba(255,255,255,.95);border-radius:16px;padding:10px 12px;box-shadow:0 4px 14px rgba(0,0,0,.15);max-width:58%;display:none;font-size:13px}
@@ -687,7 +690,7 @@ function drawFriends(){
 }
 setInterval(drawFriends, 60000);
 document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) sendLoc(true); });
-function stopListening(){ unsubs.forEach(f=>{try{f()}catch(_){}}); unsubs=[]; spots=[]; members={}; locs={}; reals={}; trails={}; customGenres=[]; applyGenres(); clearMarkers(); drawFriends(); drawReals(); }
+function stopListening(){ unsubs.forEach(f=>{try{f()}catch(_){}}); unsubs=[]; spots=[]; members={}; locs={}; reals={}; trails={}; letters={}; lopens={}; customGenres=[]; applyGenres(); clearMarkers(); drawFriends(); drawReals(); drawLetters(); }
 function clearMarkers(){ markerObjs.forEach(m=>m.remove()); markerObjs=[]; }
 let firstFit = true;
 function startListening(){
@@ -715,6 +718,14 @@ function startListening(){
   unsubs.push(onSnapshot(collection(db,"groups",gid,"trail"), snap=>{
     trails = {}; snap.docs.forEach(d=>trails[d.id]=d.data());
     updateFoot();
+  }, e=>{}));
+  unsubs.push(onSnapshot(collection(db,"groups",gid,"letters"), snap=>{
+    letters = {}; snap.docs.forEach(d=>letters[d.id]={ id:d.id, ...d.data() });
+    drawLetters();
+  }, e=>{}));
+  unsubs.push(onSnapshot(collection(db,"groups",gid,"lopen"), snap=>{
+    lopens = {}; snap.docs.forEach(d=>lopens[d.id]=d.data());
+    drawLetters();
   }, e=>{}));
   let realsFirst = true;
   unsubs.push(onSnapshot(collection(db,"groups",gid,"reals"), snap=>{
@@ -754,7 +765,7 @@ function markerEl(s){
   return el;
 }
 function renderAll(){
-  renderPill(); renderChips(); drawReals(); updateFoot();
+  renderPill(); renderChips(); drawReals(); drawLetters(); updateFoot();
   clearMarkers();
   const pts = visible().filter(s=>typeof s.lat==="number" && typeof s.lng==="number");
   pts.forEach(s=>{ markerObjs.push(new maplibregl.Marker({ element: markerEl(s), anchor:"top-left", offset:[-26,-52] }).setLngLat([s.lng, s.lat]).addTo(map)); });
@@ -989,10 +1000,12 @@ function openAddChooser(){
     <div class="row" style="flex-direction:column;gap:10px">
       <button class="btn p" id="adMap" style="width:100%">📍 地図で場所を選んで記録</button>
       <button class="btn p" id="adPhoto" style="width:100%">📷 写真から作る(撮影場所を自動で読み取り)</button>
+      <button class="btn p" id="adLetter" style="width:100%">✉️ 置き手紙を置く(今いる場所に)</button>
       <button class="btn s" id="adNo" style="width:100%">やめる</button>
     </div>`);
   $("#adMap").onclick = ()=>startPick(pos=>{ if(pos) openForm(null, pos); });
   $("#adPhoto").onclick = openPhotoImport;
+  $("#adLetter").onclick = openLetterForm;
   $("#adNo").onclick = closeSheet;
 }
 function openPhotoImport(){
@@ -1177,6 +1190,95 @@ function setFoot(on){
   if(on){ footMonth = curMonth(); updateFoot(); if(map.getZoom() > 15) map.easeTo({ zoom: 14 }); }
 }
 $("#bFoot").onclick = ()=>setFoot(!footOn);
+
+// ---------- ✉️ 置き手紙(その場所に行ったときだけ開ける) ----------
+const LETTER_OPEN_M = 50;
+let letters = {}, lopens = {}, letterMarkers = [];
+const openedByMe = id => !!(me && lopens[id+"_"+me.uid]);
+const openersOf = id => Object.values(lopens).filter(o=>o.letter===id);
+function drawLetters(){
+  letterMarkers.forEach(m=>m.remove()); letterMarkers = [];
+  if(!me || filter!=="all") return;
+  for(const L of Object.values(letters)){
+    if(typeof L.lat!=="number" || typeof L.lng!=="number") continue;
+    const mine = L.uid===me.uid, opened = mine || openedByMe(L.id);
+    const el = document.createElement("div");
+    el.innerHTML = `<div class="ltr${opened?" open":""}">${opened?"📖":"✉️"}${members[L.uid]?`<div class="mk-who">${avatarHTML(members[L.uid],20)}</div>`:""}</div>`;
+    el.addEventListener("click", e=>{ e.stopPropagation(); openLetter(L.id); });
+    letterMarkers.push(new maplibregl.Marker({ element: el, anchor:"center" }).setLngLat([L.lng, L.lat]).addTo(map));
+  }
+}
+function openLetterForm(){
+  if(!gid){ toast("グループに入ってから使えます"); return; }
+  const st = { photo:null };
+  openSheet(`<h2>✉️ 置き手紙を置く</h2>
+    <p class="hint"><b>今いる場所</b>に置きます。グループのみんなが、実際にこの場所(${LETTER_OPEN_M}m以内)に来たときだけ開けます。地図には封筒だけが見えます。</p>
+    <label class="f">メッセージ *</label>
+    <textarea id="lText" rows="4" maxlength="200" placeholder="例：ここのチーズケーキ絶対食べて！"></textarea>
+    <label class="f">写真(なくてもOK)</label>
+    <input type="file" id="lPhoto" accept="image/*">
+    <img class="pv" id="lPv" alt="">
+    <div class="row"><button class="btn s" id="lNo">やめる</button><button class="btn p" id="lOk">ここに置く</button></div>`);
+  $("#lNo").onclick = closeSheet;
+  $("#lPhoto").addEventListener("change", async e=>{
+    const f = e.target.files && e.target.files[0]; if(!f) return;
+    try{ const img = await loadImage(f); let d = toDataURL(img, 1080, false, 0.72); if(d.length > 850000) d = toDataURL(img, 800, false, 0.6); st.photo = d; const pv=$("#lPv"); pv.src=d; pv.style.display="block"; }catch(_){ toast("写真を読み込めませんでした"); }
+  });
+  $("#lOk").onclick = async ()=>{
+    const text = $("#lText").value.trim();
+    if(!text && !st.photo){ toast("メッセージか写真を入れてね"); return; }
+    const btn = $("#lOk"); btn.disabled = true; btn.textContent = "場所を確認中…";
+    const pos = await currentPos();
+    if(!pos){ toast("位置情報が取れませんでした。位置情報を許可してね"); btn.disabled=false; btn.textContent="ここに置く"; return; }
+    btn.textContent = "置いています…";
+    try{
+      const ref = await addDoc(collection(db,"groups",gid,"letters"), { uid: me.uid, at: Date.now(), lat: pos.lat, lng: pos.lng });
+      await setDoc(doc(db,"groups",gid,"letterbody",ref.id), { text: text.slice(0,200), photo: st.photo || "" });
+      closeSheet(); toast("✉️ 置き手紙を置きました"); setView([pos.lat, pos.lng], Math.max(map.getZoom(), 16));
+    }catch(e){ toast(errMsg(e)); btn.disabled=false; btn.textContent="ここに置く"; }
+  };
+}
+async function openLetter(id){
+  const L = letters[id]; if(!L) return;
+  const mine = L.uid===me.uid;
+  const head = `<h2>✉️ ${esc(who(L.uid))}さんの置き手紙</h2><p class="hint">${mdText(jstDate(L.at))} ${hhmm(L.at)} に置かれました</p>`;
+  const openers = openersOf(id).filter(o=>o.uid!==L.uid);
+  const openersHTML = mine ? `<p class="hint">${openers.length ? `開けた人：${openers.map(o=>esc(who(o.uid))).join("、")}` : "まだ誰も開けていません"}</p>` : "";
+  if(!mine && !openedByMe(id)){
+    openSheet(`${head}<div class="note" style="text-align:center;font-size:40px">🔒</div><p class="hint" id="lDist">距離を確認中…</p>
+      <div class="row"><button class="btn s" id="lClose">閉じる</button><button class="btn p" id="lTry" disabled>開ける</button></div>`);
+    $("#lClose").onclick = closeSheet;
+    const pos = await currentPos();
+    if(!$("#lDist")) return;
+    if(!pos){ $("#lDist").textContent = "位置情報が取れませんでした。位置情報を許可してね"; return; }
+    const d = distM(pos, { lat:L.lat, lng:L.lng });
+    if(d > LETTER_OPEN_M){ $("#lDist").innerHTML = `この場所まで <b>あと約${d>=1000?(d/1000).toFixed(1)+"km":Math.round(d-LETTER_OPEN_M+1)+"m"}</b>。<br>実際に行くと開けられます👣`; return; }
+    $("#lDist").textContent = "📍 この場所に着きました！"; const b = $("#lTry"); b.disabled = false;
+    b.onclick = async ()=>{
+      b.disabled = true;
+      try{ await setDoc(doc(db,"groups",gid,"lopen",id+"_"+me.uid), { uid: me.uid, letter: id, at: Date.now() }); }catch(e){ toast(errMsg(e)); b.disabled=false; return; }
+      showLetterBody(id, head, "");
+    };
+    return;
+  }
+  showLetterBody(id, head, openersHTML);
+}
+async function showLetterBody(id, head, openersHTML){
+  const L = letters[id]; const mine = L && L.uid===me.uid;
+  openSheet(`${head}<div id="lBody" class="hint">開いています…</div>${openersHTML}
+    <div class="row">${mine?`<button class="btn d" id="lDel">🗑️ 削除</button>`:""}<button class="btn s" id="lClose">閉じる</button></div>`);
+  $("#lClose").onclick = closeSheet;
+  if(mine) $("#lDel").onclick = ()=>{
+    openSheet(`<h2>この置き手紙を削除しますか？</h2><p class="hint">元に戻せません。</p><div class="row"><button class="btn s" id="ldNo">やめる</button><button class="btn d" id="ldYes">削除する</button></div>`);
+    $("#ldNo").onclick = ()=>openLetter(id);
+    $("#ldYes").onclick = async ()=>{ try{ await deleteDoc(doc(db,"groups",gid,"letterbody",id)); await deleteDoc(doc(db,"groups",gid,"letters",id)); closeSheet(); toast("削除しました"); }catch(e){ toast(errMsg(e)); } };
+  };
+  try{
+    const s = await getDoc(doc(db,"groups",gid,"letterbody",id)); const b = s.exists() ? s.data() : {};
+    if(!$("#lBody")) return;
+    $("#lBody").outerHTML = `${b.photo?`<img class="photo" src="${esc(b.photo)}" alt="" style="margin-top:8px">`:""}${b.text?`<div class="note" style="font-size:16px">${esc(b.text)}</div>`:""}`;
+  }catch(e){ if($("#lBody")) $("#lBody").textContent = "開けませんでした"; }
+}
 
 // ---------- 記録フォーム ----------
 function openForm(s, pos, st){
