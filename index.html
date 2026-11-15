@@ -58,11 +58,11 @@
   .metail{width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;border-top:13px solid #2f7bff;margin-top:-2px}
   /* 友達の現在地(白い縁) */
   /* 💨 移動中 */
-  .puff{position:absolute;left:-30px;top:18px;font-size:22px;pointer-events:none;animation:puff .8s ease-in-out infinite;white-space:nowrap}
-  .puff.r{left:auto;right:-30px;transform:scaleX(-1)}
+  .puff{position:absolute;left:-34px;top:14px;z-index:3;font-size:24px;pointer-events:none;animation:puff .8s ease-in-out infinite;white-space:nowrap;filter:drop-shadow(0 0 2px #fff) drop-shadow(0 1px 3px rgba(0,0,0,.35))}
+  .puff.r{left:auto;right:-34px;transform:scaleX(-1)}
   .puff.r{animation-name:puffr}
-  @keyframes puff{0%{opacity:1;transform:translateX(0)}100%{opacity:.25;transform:translateX(-8px)}}
-  @keyframes puffr{0%{opacity:1;transform:scaleX(-1) translateX(0)}100%{opacity:.25;transform:scaleX(-1) translateX(-8px)}}
+  @keyframes puff{0%{opacity:1;transform:translateX(0)}100%{opacity:.55;transform:translateX(-8px)}}
+  @keyframes puffr{0%{opacity:1;transform:scaleX(-1) translateX(0)}100%{opacity:.55;transform:scaleX(-1) translateX(-8px)}}
   .frpin-in{position:relative;display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 4px 8px rgba(0,0,0,.3));cursor:pointer}
   .frpic{width:62px;height:62px;border-radius:21px;border:4px solid #fff;background:#fff;overflow:hidden;box-sizing:border-box}
   .frpic .avatar{width:100%!important;height:100%!important;border-radius:0!important}
