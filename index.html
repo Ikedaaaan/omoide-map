@@ -57,6 +57,9 @@
   .mepic .avatar{width:100%!important;height:100%!important;border-radius:0!important}
   .metail{width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;border-top:13px solid #2f7bff;margin-top:-2px}
   /* 友達の現在地(白い縁) */
+  /* 🌦 天気の演出 */
+  #wx{position:fixed;inset:0;width:100%;height:100%;z-index:400;pointer-events:none}
+  #wxBadge{position:fixed;right:12px;top:calc(var(--st) + 64px);z-index:520;display:none;align-items:center;gap:2px;background:rgba(255,255,255,.92);border-radius:999px;padding:5px 10px;font-size:13px;font-weight:800;box-shadow:0 2px 8px rgba(0,0,0,.15);border:none;font-family:inherit;color:var(--ink)}
   /* 💨 移動中 */
   .puff{position:absolute;left:-34px;top:14px;z-index:3;font-size:24px;pointer-events:none;animation:puff .8s ease-in-out infinite;white-space:nowrap;filter:drop-shadow(0 0 2px #fff) drop-shadow(0 1px 3px rgba(0,0,0,.35))}
   .puff.r{left:auto;right:-34px;transform:scaleX(-1)}
@@ -300,6 +303,7 @@
 <div class="ov" id="ov"><div class="sheet" id="sheet"></div></div>
 <div class="screen" id="screen"><div class="card" id="card"></div></div>
 <div class="toast" id="toast"></div>
+<canvas id="wx"></canvas><button id="wxBadge" type="button"></button>
 <div id="footPanel"></div>
 <div id="meetBar"><b id="meetText"></b><button id="meetShoot">撮る</button><button id="meetX">✕</button></div>
 <div id="rhist"><div class="rh-top"><b>👣 自分の足あとタイム写真</b><button class="rh-x" id="rhClose">✕</button></div><div class="rh-body" id="rhBody"></div></div>
@@ -1461,6 +1465,99 @@ async function openMeet(id){
   const el = $("#mImg"); if(el) el.style.filter = "";
 }
 
+// ---------- 🌦 天気の演出(今いる場所の天気で、画面全体にうっすら雨・雪・風などをかぶせる) ----------
+// 天気は Open-Meteo(無料・登録不要)から10分おきに取得。設定:オフ/さりげなく/しっかり
+const wxMode = () => LS.get("omoide.wx") || "soft";
+let wx = null, wxAt = 0, wxParts = [], wxFlash = 0, wxRaf = null, wxLastPos = null;
+const WX_NAMES = { clear:"晴れ", night:"晴れ(夜)", cloudy:"くもり", fog:"霧", rain:"雨", heavyrain:"強い雨", snow:"雪", thunder:"雷雨" };
+const WX_EMOJI = { clear:"☀️", night:"🌙", cloudy:"☁️", fog:"🌫️", rain:"🌧️", heavyrain:"🌧️", snow:"❄️", thunder:"⛈️" };
+function wxKind(code, isDay){
+  if([95,96,99].includes(code)) return "thunder";
+  if([71,73,75,77,85,86].includes(code)) return "snow";
+  if([63,65,67,81,82].includes(code)) return "heavyrain";
+  if([51,53,55,56,57,61,66,80].includes(code)) return "rain";
+  if([45,48].includes(code)) return "fog";
+  if([2,3].includes(code)) return "cloudy";
+  return isDay ? "clear" : "night";
+}
+async function fetchWx(force){
+  const p = myPos ? { lat: myPos[0], lng: myPos[1] } : (map ? { lat: map.getCenter().lat, lng: map.getCenter().lng } : null);
+  if(!p) return;
+  const moved = wxLastPos ? distM(p, wxLastPos) : 1e9;
+  if(!force && wx && Date.now() - wxAt < 10*60*1000 && moved < 3000) return;
+  try{
+    const u = `https://api.open-meteo.com/v1/forecast?latitude=${p.lat.toFixed(3)}&longitude=${p.lng.toFixed(3)}&current=temperature_2m,weather_code,wind_speed_10m,is_day&wind_speed_unit=ms&timezone=auto`;
+    const j = await (await fetch(u)).json(); const c = j && j.current; if(!c) return;
+    wx = { kind: wxKind(c.weather_code, c.is_day), temp: Math.round(c.temperature_2m), wind: c.wind_speed_10m, windy: c.wind_speed_10m >= 8 };
+    wxAt = Date.now(); wxLastPos = p;
+    wxStart();
+  }catch(_){}
+}
+function wxBadge(){
+  const b = $("#wxBadge"); if(!b) return;
+  if(!wx || wxMode()==="off"){ b.style.display = "none"; return; }
+  b.style.display = "flex";
+  b.textContent = `${WX_EMOJI[wx.kind]}${wx.windy?"💨":""} ${wx.temp}℃`;
+}
+$("#wxBadge").onclick = ()=>{ if(wx) toast(`${WX_NAMES[wx.kind]} ${wx.temp}℃ ・ 風 ${wx.wind.toFixed(1)}m/s(天気:Open-Meteo)`); };
+// 粒(雨・雪・風・星・雲)を作り直す
+function wxReset(){
+  const cv = $("#wx"); if(!cv) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
+  const W = cv.width, H = cv.height, strong = wxMode()==="strong";
+  wxParts = [];
+  if(!wx) return;
+  const k = wx.kind, area = (W*H) / (390*844*dpr*dpr);
+  const n = (base)=>Math.round(base * area * (strong ? 1 : 0.45));
+  const R = Math.random;
+  if(k==="rain" || k==="heavyrain" || k==="thunder"){ const m = k==="rain" ? 70 : 150; for(let i=0;i<n(m);i++) wxParts.push({ t:"rain", x:R()*W, y:R()*H, l:(10+R()*14)*dpr, v:(9+R()*6)*dpr }); }
+  if(k==="snow") for(let i=0;i<n(90);i++) wxParts.push({ t:"snow", x:R()*W, y:R()*H, r:(1.5+R()*3)*dpr, v:(0.6+R()*1.2)*dpr, p:R()*6.28 });
+  if(k==="night") for(let i=0;i<n(60);i++) wxParts.push({ t:"star", x:R()*W, y:R()*H*0.7, r:(0.6+R()*1.2)*dpr, p:R()*6.28 });
+  if(k==="cloudy" || k==="fog") for(let i=0;i<n(6)+1;i++) wxParts.push({ t:"cloud", x:R()*W, y:R()*H, r:(120+R()*160)*dpr, v:(0.15+R()*0.25)*dpr });
+  if(wx.windy) for(let i=0;i<n(26);i++) wxParts.push({ t:"wind", x:R()*W, y:R()*H, l:(60+R()*120)*dpr, v:(10+R()*8)*dpr });
+}
+function wxFrame(){
+  wxRaf = null;
+  const cv = $("#wx"); if(!cv) return;
+  const mode = wxMode();
+  const x = cv.getContext("2d"), W = cv.width, H = cv.height;
+  x.clearRect(0,0,W,H);
+  if(mode==="off" || !wx || document.hidden){ cv.style.display = mode==="off" ? "none" : "block"; return; }
+  cv.style.display = "block";
+  const s = mode==="strong" ? 1 : 0.5, k = wx.kind, t = Date.now()/1000;
+  const dx = wx.windy ? 3 : 1.2;   // 風が強いと雨や雪が斜めに
+  // 画面全体の色味
+  const tint = { clear:null, night:"rgba(20,30,70,", cloudy:"rgba(110,120,135,", fog:"rgba(235,238,242,", rain:"rgba(60,90,130,", heavyrain:"rgba(40,60,100,", snow:"rgba(220,230,245,", thunder:"rgba(35,40,70," }[k];
+  const ta = { night:0.28, cloudy:0.14, fog:0.35, rain:0.16, heavyrain:0.24, snow:0.16, thunder:0.28 }[k];
+  if(tint){ x.fillStyle = tint + (ta*s) + ")"; x.fillRect(0,0,W,H); }
+  if(k==="clear"){ const g = x.createRadialGradient(W*0.85, H*0.05, 0, W*0.85, H*0.05, Math.max(W,H)*0.75); const a = (0.22 + 0.05*Math.sin(t*0.8))*s; g.addColorStop(0, `rgba(255,214,120,${a})`); g.addColorStop(1, "rgba(255,214,120,0)"); x.fillStyle = g; x.fillRect(0,0,W,H); }
+  for(const p of wxParts){
+    if(p.t==="rain"){
+      x.strokeStyle = `rgba(200,220,255,${0.55*s+0.15})`; x.lineWidth = 1.2; x.beginPath(); x.moveTo(p.x, p.y); x.lineTo(p.x - p.l*dx*0.15, p.y + p.l); x.stroke();
+      p.y += p.v; p.x -= p.v*dx*0.15; if(p.y > H){ p.y = -p.l; p.x = Math.random()*W*1.2; }
+    }else if(p.t==="snow"){
+      x.fillStyle = `rgba(255,255,255,${0.7*s+0.2})`; x.beginPath(); x.arc(p.x + Math.sin(t+p.p)*6, p.y, p.r, 0, 6.28); x.fill();
+      p.y += p.v; p.x -= (dx-1)*0.8; if(p.y > H){ p.y = -5; p.x = Math.random()*W; } if(p.x < -10) p.x = W+10;
+    }else if(p.t==="star"){
+      x.fillStyle = `rgba(255,255,230,${(0.35+0.35*Math.sin(t*2+p.p))*s})`; x.beginPath(); x.arc(p.x, p.y, p.r, 0, 6.28); x.fill();
+    }else if(p.t==="cloud"){
+      const g = x.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r); const a = (k==="fog"?0.3:0.16)*s; g.addColorStop(0, `rgba(255,255,255,${a})`); g.addColorStop(1, "rgba(255,255,255,0)");
+      x.fillStyle = g; x.fillRect(p.x-p.r, p.y-p.r, p.r*2, p.r*2); p.x += p.v; if(p.x - p.r > W) p.x = -p.r;
+    }else if(p.t==="wind"){
+      x.strokeStyle = `rgba(255,255,255,${0.45*s+0.1})`; x.lineWidth = 1.5; x.beginPath(); x.moveTo(p.x, p.y); x.quadraticCurveTo(p.x - p.l/2, p.y - 6, p.x - p.l, p.y); x.stroke();
+      p.x += p.v; if(p.x - p.l > W){ p.x = -10; p.y = Math.random()*H; }
+    }
+  }
+  if(k==="thunder"){ if(wxFlash <= 0 && Math.random() < 0.004) wxFlash = 1; if(wxFlash > 0){ x.fillStyle = `rgba(255,255,255,${wxFlash*0.5*s})`; x.fillRect(0,0,W,H); wxFlash -= 0.06; } }
+  wxRaf = requestAnimationFrame(wxFrame);
+}
+function wxStart(){ wxBadge(); wxReset(); if(!wxRaf) wxRaf = requestAnimationFrame(wxFrame); }
+addEventListener("resize", ()=>wxReset());
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden){ fetchWx(); wxStart(); } });
+setInterval(()=>fetchWx(), 60*1000);
+setTimeout(()=>{ fetchWx(true).then(wxStart); }, 2500);
+
 // ---------- 記録フォーム ----------
 function openForm(s, pos, st){
   const edit = !!s;
@@ -2032,6 +2129,9 @@ $("#bSettings").onclick = ()=>{
     <label class="f">👣 歩いた道を足あとに残す</label>
     <div class="tabs2" id="trailSeg" style="margin-top:0"><button data-v="on">残す</button><button data-v="off">残さない</button></div>
     <div class="hint">アプリを開いている間に歩いた場所(約50mごと)を、参加しているグループの「足あとモード」に色として残します。</div>
+    <label class="f">🌦 天気の演出</label>
+    <div class="tabs2" id="wxSeg" style="margin-top:0"><button data-v="off">オフ</button><button data-v="soft">さりげなく</button><button data-v="strong">しっかり</button></div>
+    <div class="hint">今いる場所の天気に合わせて、雨・雪・風などの雰囲気を画面にかぶせます(天気:Open-Meteo)。電池が気になるときはオフに。</div>
     <label class="f">現在地の共有</label>
     <div class="tabs2" id="shareSeg" style="margin-top:0">
       <button data-v="off">共有しない</button><button data-v="on">共有する</button><button data-v="fuzzy">あいまい</button>
@@ -2056,6 +2156,9 @@ $("#bSettings").onclick = ()=>{
   const markTrail = ()=>[...$("#trailSeg").children].forEach(b=>b.classList.toggle("on", b.dataset.v===(trailOn()?"on":"off")));
   markTrail();
   $("#trailSeg").onclick = e=>{ const b=e.target.closest("button"); if(!b) return; LS.set("omoide.trail", b.dataset.v); markTrail(); updateFootPanel(); };
+  const markWx = ()=>[...$("#wxSeg").children].forEach(b=>b.classList.toggle("on", b.dataset.v===wxMode()));
+  markWx();
+  $("#wxSeg").onclick = e=>{ const b=e.target.closest("button"); if(!b) return; LS.set("omoide.wx", b.dataset.v); markWx(); wxStart(); if(b.dataset.v!=="off") fetchWx(); };
   const markShare = ()=>[...$("#shareSeg").children].forEach(b=>b.classList.toggle("on", b.dataset.v===shareMode()));
   markShare();
   $("#shareSeg").onclick = async e=>{
