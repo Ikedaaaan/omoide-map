@@ -57,6 +57,12 @@
   .mepic .avatar{width:100%!important;height:100%!important;border-radius:0!important}
   .metail{width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;border-top:13px solid #2f7bff;margin-top:-2px}
   /* 友達の現在地(白い縁) */
+  /* 💨 移動中 */
+  .puff{position:absolute;left:-30px;top:18px;font-size:22px;pointer-events:none;animation:puff .8s ease-in-out infinite;white-space:nowrap}
+  .puff.r{left:auto;right:-30px;transform:scaleX(-1)}
+  .puff.r{animation-name:puffr}
+  @keyframes puff{0%{opacity:1;transform:translateX(0)}100%{opacity:.25;transform:translateX(-8px)}}
+  @keyframes puffr{0%{opacity:1;transform:scaleX(-1) translateX(0)}100%{opacity:.25;transform:scaleX(-1) translateX(-8px)}}
   .frpin-in{position:relative;display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 4px 8px rgba(0,0,0,.3));cursor:pointer}
   .frpic{width:62px;height:62px;border-radius:21px;border:4px solid #fff;background:#fff;overflow:hidden;box-sizing:border-box}
   .frpic .avatar{width:100%!important;height:100%!important;border-radius:0!important}
@@ -457,6 +463,7 @@ function startLocate(pan){
   if(watchId===null){
     watchId = navigator.geolocation.watchPosition(p=>{
       myPos = [p.coords.latitude, p.coords.longitude];
+      updateMotion(p);
       if(!meMarker) drawMe();
       else moveMe();
       sendLoc(false);
@@ -470,6 +477,32 @@ function startLocate(pan){
 }
 let pendingPan = false;
 let meBase = null, heading = null;
+// ---------- 💨 移動中の表示(歩く=💨、走る・自転車など=💨💨) ----------
+let mySamples = [], mySpeed = 0, myDir = 1, friendDir = {};
+const motionLevel = spd => spd >= 2.5 ? 2 : spd >= 0.8 ? 1 : 0;   // m/秒(約3km/h以上で表示)
+const puffHTML = (lv, dir) => lv ? `<div class="puff${dir<0?" r":""}">${lv>=2?"💨💨":"💨"}</div>` : "";
+function updateMotion(p){
+  const now = Date.now();
+  if(p.coords.accuracy && p.coords.accuracy > 60) return;   // 精度が悪いときは使わない
+  mySamples.push({ t: now, lat: p.coords.latitude, lng: p.coords.longitude });
+  mySamples = mySamples.filter(x=>now - x.t <= 45000);
+  let spd = (typeof p.coords.speed==="number" && p.coords.speed >= 0) ? p.coords.speed : null;
+  const a = mySamples[0], b = mySamples[mySamples.length-1];
+  if(a && b && b.t - a.t >= 8000){
+    const d = distM({lat:a.lat,lng:a.lng}, {lat:b.lat,lng:b.lng});
+    if(spd===null) spd = d / ((b.t - a.t)/1000);
+    if(Math.abs(b.lng - a.lng) > 0.00003) myDir = b.lng > a.lng ? 1 : -1;
+  }
+  mySpeed = spd || 0;
+  applyMyMotion();
+}
+function applyMyMotion(){
+  if(!meMarker) return;
+  const w = meMarker.getElement().querySelector(".puffw"); if(!w) return;
+  w.innerHTML = puffHTML(motionLevel(mySpeed), myDir);
+}
+setInterval(()=>{ const last = mySamples[mySamples.length-1]; if(mySpeed && (!last || Date.now()-last.t > 30000)){ mySpeed = 0; applyMyMotion(); } }, 10000);
+
 function drawMe(){ // 現在地を自分のアイコンで表示(位置はこの端末の中だけで使い、送信しない)
   if(!myPos) return;
   if(meMarker){ meMarker.remove(); meMarker=null; }
@@ -480,11 +513,11 @@ function drawMe(){ // 現在地を自分のアイコンで表示(位置はこの
   meBase = new maplibregl.Marker({ element: base, rotationAlignment:"map", pitchAlignment:"map" }).setLngLat(ll).addTo(map);
   const el=document.createElement("div"); // 位置はMapLibreが外側の箱で管理するので、アニメは内側だけに付ける
   const mm = (me && members[me.uid]) || myProfileLS();
-  el.innerHTML = `<div class="mepin-in">${noteActive(mm)?`<div class="pnote">${esc(mm.note)}</div>`:""}<div class="mepic">${avatarHTML(myself(), 64)}</div><div class="metail"></div></div>`;
+  el.innerHTML = `<div class="mepin-in">${noteActive(mm)?`<div class="pnote">${esc(mm.note)}</div>`:""}<div class="puffw"></div><div class="mepic">${avatarHTML(myself(), 64)}</div><div class="metail"></div></div>`;
   el.style.cursor = "pointer";
   el.addEventListener("click", e=>{ e.stopPropagation(); if(me && gid) openProfile(me.uid); });
   meMarker = new maplibregl.Marker({ element: el, anchor:"bottom", offset:[0,-6] }).setLngLat(ll).addTo(map);
-  applyHeading();
+  applyHeading(); applyMyMotion();
 }
 function moveMe(){ const ll=[myPos[1], myPos[0]]; if(meMarker) meMarker.setLngLat(ll); if(meBase) meBase.setLngLat(ll); }
 function applyHeading(){
@@ -701,7 +734,7 @@ async function sendLoc(force){
   let lat = myPos[0], lng = myPos[1];
   if(mode==="fuzzy"){ lat = Math.round(lat/0.005)*0.005; lng = Math.round(lng/0.006)*0.006; } // 約500m単位にぼかす
   lastSent = { t:now, lat:myPos[0], lng:myPos[1] };
-  const body = { lat, lng, fuzzy: mode==="fuzzy", updatedAt: now };
+  const body = { lat, lng, fuzzy: mode==="fuzzy", updatedAt: now, spd: mode==="fuzzy" ? 0 : Math.round(mySpeed*10)/10 };
   await Promise.all(allGroupIds().map(g=>setDoc(doc(db,"groups",g,"locs",me.uid), body).catch(()=>{})));   // 参加している全部のグループに送る
 }
 function agoText(t){
@@ -718,7 +751,8 @@ function drawFriends(){
     const old = Date.now() - (L.updatedAt||0) > 3600*1000;
     const el = document.createElement("div");
     const fm = members[id];
-    el.innerHTML = `<div class="frpin-in${old?" old":""}${L.fuzzy?" fuzzy":""}">${noteActive(fm)?`<div class="pnote">${esc(fm.note)}</div>`:""}<div class="frpic">${avatarHTML(fm, 54)}</div><div class="frtail"></div><div class="plabel"><b>${esc(who(id))}</b><span>${agoText(L.updatedAt)}${L.fuzzy?"・あいまい":""}</span></div></div>`;
+    const flv = (!L.fuzzy && Date.now() - (L.updatedAt||0) < 3*60*1000) ? motionLevel(L.spd||0) : 0;   // 3分以内の速さだけ使う
+    el.innerHTML = `<div class="frpin-in${old?" old":""}${L.fuzzy?" fuzzy":""}">${noteActive(fm)?`<div class="pnote">${esc(fm.note)}</div>`:""}${puffHTML(flv, friendDir[id]||1)}<div class="frpic">${avatarHTML(fm, 54)}</div><div class="frtail"></div><div class="plabel"><b>${esc(who(id))}</b><span>${agoText(L.updatedAt)}${L.fuzzy?"・あいまい":""}</span></div></div>`;
     el.addEventListener("click", e=>{ e.stopPropagation(); openProfile(id); });
     friendMarkers.push(new maplibregl.Marker({ element: el, anchor:"bottom" }).setLngLat([L.lng, L.lat]).addTo(map));
   }
@@ -742,7 +776,9 @@ function startListening(){
     renderAll(); drawMe(); drawFriends();
   }, e=>{}));
   unsubs.push(onSnapshot(collection(db,"groups",gid,"locs"), snap=>{
+    const prev = locs;
     locs = {}; snap.docs.forEach(d=>locs[d.id]=d.data());
+    for(const [u,L] of Object.entries(locs)){ const o = prev[u]; if(o && typeof o.lng==="number" && Math.abs(L.lng - o.lng) > 0.00003) friendDir[u] = L.lng > o.lng ? 1 : -1; }
     drawFriends(); checkMeet();
   }, e=>{}));
   unsubs.push(onSnapshot(collection(db,"groups",gid,"genres"), snap=>{
