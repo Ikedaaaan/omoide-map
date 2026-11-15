@@ -57,6 +57,19 @@
   .mepic .avatar{width:100%!important;height:100%!important;border-radius:0!important}
   .metail{width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;border-top:13px solid #2f7bff;margin-top:-2px}
   /* 友達の現在地(白い縁) */
+  /* 👤 人で探す */
+  .pxpeople{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}
+  .pxp{border:2px solid transparent;background:#f6f1ea;border-radius:14px;padding:7px 2px;display:flex;flex-direction:column;align-items:center;gap:2px;font-family:inherit;color:var(--ink);min-width:0}
+  .pxp img{width:54px;height:54px;border-radius:50%;object-fit:cover;background:#ddd}
+  .pxp b{font-size:11px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pxp span{font-size:10px;opacity:.6}
+  .pxp.on{border-color:var(--accent);background:#fff1ec}
+  .pxp.more{justify-content:center}
+  .pxbar{height:6px;background:#eee;border-radius:3px;overflow:hidden;margin-top:4px}
+  .pxbar i{display:block;height:100%;background:var(--accent);transition:width .3s}
+  .pxsaved{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .pxchip{border:none;background:#fff1ec;color:var(--ink);border-radius:999px;padding:7px 12px;font-size:13px;font-weight:700;font-family:inherit}
+  .pxbtn{margin-left:auto;align-self:center;border:none;background:#fff1ec;color:#e0552f;border-radius:999px;padding:5px 11px;font-size:12px;font-weight:800;font-family:inherit}
   /* 🌦 天気の演出 */
   #wx{position:fixed;inset:0;width:100%;height:100%;z-index:400;pointer-events:none}
   #wxBadge{position:fixed;right:12px;top:calc(var(--st) + 64px);z-index:520;display:none;align-items:center;gap:2px;background:rgba(255,255,255,.92);border-radius:999px;padding:5px 10px;font-size:13px;font-weight:800;box-shadow:0 2px 8px rgba(0,0,0,.15);border:none;font-family:inherit;color:var(--ink)}
@@ -878,11 +891,12 @@ async function openDetail(id){
     <h2 style="margin-top:12px">${g.emoji} ${esc(s.name)}</h2>
     <div class="meta"><span class="stars" style="font-size:19px">${starStr(s.rating)}</span> また行きたい度<br>${esc(g.label)} ・ ${esc(s.visited||"日付なし")} ・ 記録：<a href="#" id="dWho" style="color:inherit;font-weight:800">${avatarHTML(members[s.createdBy],20)} ${esc(who(s.createdBy))}</a></div>
     ${s.note?`<div class="note">${esc(s.note)}</div>`:""}
-    <div class="al-h">📚 アルバム <span class="hint" style="margin:0" id="dAlbumN"></span></div>
+    <div class="al-h">📚 アルバム <span class="hint" style="margin:0" id="dAlbumN"></span><button class="pxbtn" id="dPeople" type="button">👤 人で探す</button></div>
     <div class="al-grid" id="dAlbum"><p class="hint" style="grid-column:1/-1">読み込み中…</p></div>
     <a class="gm" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.lat+","+s.lng)}" target="_blank" rel="noopener">🗺️ Googleマップで開く</a>
     <div class="row">${mine?`<button class="btn s" id="dEdit">✏️ 編集</button><button class="btn d" id="dDel">🗑️ 削除</button>`:""}<button class="btn s" id="dClose">閉じる</button></div>`);
   $("#dClose").onclick = closeSheet;
+  $("#dPeople").onclick = openPeople;
   $("#dWho").onclick = e=>{ e.preventDefault(); openProfile(s.createdBy); };
   if(mine){ $("#dEdit").onclick=()=>openForm(s, {lat:s.lat,lng:s.lng}); $("#dDel").onclick=()=>confirmDelete(s); }
   renderAlbum(s);
@@ -1468,6 +1482,7 @@ async function openMeet(id){
 // ---------- 🌦 天気の演出(今いる場所の天気で、画面全体にうっすら雨・雪・風などをかぶせる) ----------
 // 天気は Open-Meteo(無料・登録不要)から10分おきに取得。設定:オフ/さりげなく/しっかり
 const wxMode = () => LS.get("omoide.wx") || "soft";
+let wxState = "idle", wxErr = "";
 let wx = null, wxAt = 0, wxParts = [], wxFlash = 0, wxRaf = null, wxLastPos = null;
 const WX_NAMES = { clear:"晴れ", night:"晴れ(夜)", cloudy:"くもり", fog:"霧", rain:"雨", heavyrain:"強い雨", snow:"雪", thunder:"雷雨" };
 const WX_EMOJI = { clear:"☀️", night:"🌙", cloudy:"☁️", fog:"🌫️", rain:"🌧️", heavyrain:"🌧️", snow:"❄️", thunder:"⛈️" };
@@ -1485,21 +1500,39 @@ async function fetchWx(force){
   if(!p) return;
   const moved = wxLastPos ? distM(p, wxLastPos) : 1e9;
   if(!force && wx && Date.now() - wxAt < 10*60*1000 && moved < 3000) return;
+  wxState = wx ? "ok" : "loading"; wxBadge();
+  const la = p.lat.toFixed(3), lo = p.lng.toFixed(3);
   try{
-    const u = `https://api.open-meteo.com/v1/forecast?latitude=${p.lat.toFixed(3)}&longitude=${p.lng.toFixed(3)}&current=temperature_2m,weather_code,wind_speed_10m,is_day&wind_speed_unit=ms&timezone=auto`;
-    const j = await (await fetch(u)).json(); const c = j && j.current; if(!c) return;
-    wx = { kind: wxKind(c.weather_code, c.is_day), temp: Math.round(c.temperature_2m), wind: c.wind_speed_10m, windy: c.wind_speed_10m >= 8 };
-    wxAt = Date.now(); wxLastPos = p;
-    wxStart();
-  }catch(_){}
+    // ① Open-Meteo
+    const u = `https://api.open-meteo.com/v1/forecast?latitude=${la}&longitude=${lo}&current=temperature_2m,weather_code,wind_speed_10m,is_day&wind_speed_unit=ms&timezone=auto`;
+    const j = await (await fetch(u, { cache:"no-store" })).json(); const c = j && j.current; if(!c) throw new Error("no current");
+    wx = { kind: wxKind(c.weather_code, c.is_day), temp: Math.round(c.temperature_2m), wind: c.wind_speed_10m, windy: c.wind_speed_10m >= 8, src:"Open-Meteo" };
+  }catch(e1){
+    try{
+      // ② 予備: MET Norway(ノルウェー気象局・登録不要)
+      const j = await (await fetch(`https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=${la}&lon=${lo}`)).json();
+      const ts = j.properties.timeseries[0], d = ts.data.instant.details;
+      const sym = ((ts.data.next_1_hours||ts.data.next_6_hours||{}).summary||{}).symbol_code || "";
+      const h = new Date().getHours(), isDay = h>=6 && h<17;
+      const kind = /thunder/.test(sym) ? "thunder" : /snow|sleet/.test(sym) ? "snow" : /heavyrain/.test(sym) ? "heavyrain" : /rain/.test(sym) ? "rain" : /fog/.test(sym) ? "fog" : /cloudy|partlycloudy/.test(sym) ? "cloudy" : (isDay ? "clear" : "night");
+      wx = { kind, temp: Math.round(d.air_temperature), wind: d.wind_speed, windy: d.wind_speed >= 8, src:"MET Norway" };
+    }catch(e2){ wxState = "error"; wxErr = String(e1 && e1.message || e1); wxBadge(); return; }
+  }
+  wxState = "ok"; wxAt = Date.now(); wxLastPos = p;
+  wxStart();
 }
 function wxBadge(){
   const b = $("#wxBadge"); if(!b) return;
-  if(!wx || wxMode()==="off"){ b.style.display = "none"; return; }
+  if(wxMode()==="off"){ b.style.display = "none"; return; }
   b.style.display = "flex";
+  if(!wx){ b.textContent = wxState==="error" ? "⚠️ 天気" : "🌦 …"; return; }
   b.textContent = `${WX_EMOJI[wx.kind]}${wx.windy?"💨":""} ${wx.temp}℃`;
 }
-$("#wxBadge").onclick = ()=>{ if(wx) toast(`${WX_NAMES[wx.kind]} ${wx.temp}℃ ・ 風 ${wx.wind.toFixed(1)}m/s(天気:Open-Meteo)`); };
+$("#wxBadge").onclick = ()=>{
+  if(wx) toast(`${WX_NAMES[wx.kind]} ${wx.temp}℃ ・ 風 ${wx.wind.toFixed(1)}m/s(天気:${wx.src||"Open-Meteo"})`);
+  else if(wxState==="error"){ toast("天気を取得できませんでした。もう一度試します(" + wxErr + ")"); fetchWx(true); }
+  else toast("天気を取得中…");
+};
 // 粒(雨・雪・風・星・雲)を作り直す
 function wxReset(){
   const cv = $("#wx"); if(!cv) return;
@@ -1509,7 +1542,7 @@ function wxReset(){
   wxParts = [];
   if(!wx) return;
   const k = wx.kind, area = (W*H) / (390*844*dpr*dpr);
-  const n = (base)=>Math.round(base * area * (strong ? 1 : 0.45));
+  const n = (base)=>Math.round(base * area * (strong ? 1.3 : 0.8));
   const R = Math.random;
   if(k==="rain" || k==="heavyrain" || k==="thunder"){ const m = k==="rain" ? 70 : 150; for(let i=0;i<n(m);i++) wxParts.push({ t:"rain", x:R()*W, y:R()*H, l:(10+R()*14)*dpr, v:(9+R()*6)*dpr }); }
   if(k==="snow") for(let i=0;i<n(90);i++) wxParts.push({ t:"snow", x:R()*W, y:R()*H, r:(1.5+R()*3)*dpr, v:(0.6+R()*1.2)*dpr, p:R()*6.28 });
@@ -1525,31 +1558,31 @@ function wxFrame(){
   x.clearRect(0,0,W,H);
   if(mode==="off" || !wx || document.hidden){ cv.style.display = mode==="off" ? "none" : "block"; return; }
   cv.style.display = "block";
-  const s = mode==="strong" ? 1 : 0.5, k = wx.kind, t = Date.now()/1000;
+  const s = mode==="strong" ? 1.4 : 0.85, k = wx.kind, t = Date.now()/1000;
   const dx = wx.windy ? 3 : 1.2;   // 風が強いと雨や雪が斜めに
   // 画面全体の色味
   const tint = { clear:null, night:"rgba(20,30,70,", cloudy:"rgba(110,120,135,", fog:"rgba(235,238,242,", rain:"rgba(60,90,130,", heavyrain:"rgba(40,60,100,", snow:"rgba(220,230,245,", thunder:"rgba(35,40,70," }[k];
-  const ta = { night:0.28, cloudy:0.14, fog:0.35, rain:0.16, heavyrain:0.24, snow:0.16, thunder:0.28 }[k];
+  const ta = { night:0.30, cloudy:0.18, fog:0.38, rain:0.22, heavyrain:0.30, snow:0.20, thunder:0.32 }[k];
   if(tint){ x.fillStyle = tint + (ta*s) + ")"; x.fillRect(0,0,W,H); }
-  if(k==="clear"){ const g = x.createRadialGradient(W*0.85, H*0.05, 0, W*0.85, H*0.05, Math.max(W,H)*0.75); const a = (0.22 + 0.05*Math.sin(t*0.8))*s; g.addColorStop(0, `rgba(255,214,120,${a})`); g.addColorStop(1, "rgba(255,214,120,0)"); x.fillStyle = g; x.fillRect(0,0,W,H); }
+  if(k==="clear"){ const g = x.createRadialGradient(W*0.85, H*0.05, 0, W*0.85, H*0.05, Math.max(W,H)*0.75); const a = Math.min(0.6, (0.3 + 0.06*Math.sin(t*0.8))*s); g.addColorStop(0, `rgba(255,214,120,${a})`); g.addColorStop(1, "rgba(255,214,120,0)"); x.fillStyle = g; x.fillRect(0,0,W,H); }
   for(const p of wxParts){
     if(p.t==="rain"){
-      x.strokeStyle = `rgba(200,220,255,${0.55*s+0.15})`; x.lineWidth = 1.2; x.beginPath(); x.moveTo(p.x, p.y); x.lineTo(p.x - p.l*dx*0.15, p.y + p.l); x.stroke();
+      x.strokeStyle = `rgba(210,228,255,${Math.min(0.95,0.55*s+0.2)})`; x.lineWidth = 1.6*Math.min(2, window.devicePixelRatio||1); x.beginPath(); x.moveTo(p.x, p.y); x.lineTo(p.x - p.l*dx*0.15, p.y + p.l); x.stroke();
       p.y += p.v; p.x -= p.v*dx*0.15; if(p.y > H){ p.y = -p.l; p.x = Math.random()*W*1.2; }
     }else if(p.t==="snow"){
-      x.fillStyle = `rgba(255,255,255,${0.7*s+0.2})`; x.beginPath(); x.arc(p.x + Math.sin(t+p.p)*6, p.y, p.r, 0, 6.28); x.fill();
+      x.fillStyle = `rgba(255,255,255,${Math.min(1,0.7*s+0.25)})`; x.beginPath(); x.arc(p.x + Math.sin(t+p.p)*6, p.y, p.r, 0, 6.28); x.fill();
       p.y += p.v; p.x -= (dx-1)*0.8; if(p.y > H){ p.y = -5; p.x = Math.random()*W; } if(p.x < -10) p.x = W+10;
     }else if(p.t==="star"){
       x.fillStyle = `rgba(255,255,230,${(0.35+0.35*Math.sin(t*2+p.p))*s})`; x.beginPath(); x.arc(p.x, p.y, p.r, 0, 6.28); x.fill();
     }else if(p.t==="cloud"){
-      const g = x.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r); const a = (k==="fog"?0.3:0.16)*s; g.addColorStop(0, `rgba(255,255,255,${a})`); g.addColorStop(1, "rgba(255,255,255,0)");
+      const g = x.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r); const a = (k==="fog"?0.32:0.2)*s; g.addColorStop(0, `rgba(255,255,255,${a})`); g.addColorStop(1, "rgba(255,255,255,0)");
       x.fillStyle = g; x.fillRect(p.x-p.r, p.y-p.r, p.r*2, p.r*2); p.x += p.v; if(p.x - p.r > W) p.x = -p.r;
     }else if(p.t==="wind"){
-      x.strokeStyle = `rgba(255,255,255,${0.45*s+0.1})`; x.lineWidth = 1.5; x.beginPath(); x.moveTo(p.x, p.y); x.quadraticCurveTo(p.x - p.l/2, p.y - 6, p.x - p.l, p.y); x.stroke();
+      x.strokeStyle = `rgba(255,255,255,${Math.min(0.9,0.5*s+0.1)})`; x.lineWidth = 2.2; x.beginPath(); x.moveTo(p.x, p.y); x.quadraticCurveTo(p.x - p.l/2, p.y - 6, p.x - p.l, p.y); x.stroke();
       p.x += p.v; if(p.x - p.l > W){ p.x = -10; p.y = Math.random()*H; }
     }
   }
-  if(k==="thunder"){ if(wxFlash <= 0 && Math.random() < 0.004) wxFlash = 1; if(wxFlash > 0){ x.fillStyle = `rgba(255,255,255,${wxFlash*0.5*s})`; x.fillRect(0,0,W,H); wxFlash -= 0.06; } }
+  if(k==="thunder"){ if(wxFlash <= 0 && Math.random() < 0.004) wxFlash = 1; if(wxFlash > 0){ x.fillStyle = `rgba(255,255,255,${Math.min(0.8,wxFlash*0.5*s)})`; x.fillRect(0,0,W,H); wxFlash -= 0.06; } }
   wxRaf = requestAnimationFrame(wxFrame);
 }
 function wxStart(){ wxBadge(); wxReset(); if(!wxRaf) wxRaf = requestAnimationFrame(wxFrame); }
@@ -1557,6 +1590,216 @@ addEventListener("resize", ()=>wxReset());
 document.addEventListener("visibilitychange", ()=>{ if(!document.hidden){ fetchWx(); wxStart(); } });
 setInterval(()=>fetchWx(), 60*1000);
 setTimeout(()=>{ fetchWx(true).then(wxStart); }, 2500);
+
+// ---------- 👤 人で探す(顔でアルバムの写真を絞り込む) ----------
+// 顔の解析はこの端末の中だけ(face-api)。顔のデータと名前は端末(IndexedDB)に保存し、サーバーには送らない。
+// サーバーに保存するのは「人のアルバム」(名前と写真IDのリスト)だけ。
+const FACE_LIB = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.esm.js";
+const FACE_MODELS = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/model/";
+const FACE_TH = 0.5;   // 顔の似ている度合い(小さいほど厳しい)
+let faceapi = null, faceLoading = null;
+async function loadFaceApi(){
+  if(faceapi) return faceapi;
+  if(!faceLoading) faceLoading = (async()=>{
+    const m = await import(FACE_LIB);
+    const fa = (m.nets ? m : m.default);
+    try{ if(fa.tf){ await fa.tf.setBackend("webgl"); await fa.tf.ready(); } }catch(_){}
+    await Promise.all([
+      fa.nets.ssdMobilenetv1.loadFromUri(FACE_MODELS),
+      fa.nets.faceLandmark68Net.loadFromUri(FACE_MODELS),
+      fa.nets.faceRecognitionNet.loadFromUri(FACE_MODELS)
+    ]);
+    faceapi = fa; return fa;
+  })().catch(e=>{ faceLoading = null; throw e; });
+  return faceLoading;
+}
+// 端末内の保存場所(IndexedDB)
+const fdb = (()=>{
+  let p = null;
+  const open = ()=> p || (p = new Promise((res,rej)=>{ const r = indexedDB.open("ashiart-faces", 1); r.onupgradeneeded = ()=>r.result.createObjectStore("kv"); r.onsuccess = ()=>res(r.result); r.onerror = ()=>rej(r.error); }));
+  const run = async (mode, fn)=>{ const d = await open(); return new Promise((res,rej)=>{ const t = d.transaction("kv", mode); const r = fn(t.objectStore("kv")); t.oncomplete = ()=>res(r && r.result); t.onerror = ()=>rej(t.error); }); };
+  return {
+    get: k=>run("readonly", s=>s.get(k)),
+    set: (k,v)=>run("readwrite", s=>s.put(v,k)),
+    all: async prefix=>{ const d = await open(); return new Promise((res,rej)=>{ const out = {}; const t = d.transaction("kv","readonly");
+      const rq = t.objectStore("kv").openCursor(IDBKeyRange.bound(prefix, prefix + "\uffff"));
+      rq.onsuccess = ()=>{ const c = rq.result; if(c){ out[c.key] = c.value; c.continue(); } };
+      t.oncomplete = ()=>res(out); t.onerror = ()=>rej(t.error); }); }
+  };
+})();
+let fx = null;   // { gid, items, faces:{albumId:{faces:[{d,c}]}}, persons:[{id,name,faces:[key]}], sel:Set, cl, running, done, todo, err }
+function fdist(a, b){ let s = 0; for(let i=0;i<a.length;i++){ const d = a[i]-b[i]; s += d*d; } return Math.sqrt(s); }
+function faceCrop(img, b){
+  const s = Math.max(b.width, b.height) * 1.6, cv = document.createElement("canvas"); cv.width = cv.height = 96;
+  cv.getContext("2d").drawImage(img, b.x + b.width/2 - s/2, b.y + b.height/2 - s/2, s, s, 0, 0, 96, 96);
+  return cv.toDataURL("image/jpeg", 0.7);
+}
+// 顔を「人」ごとにまとめる(名前を付けた人を優先、残りは似ている順に)
+function faceClusters(){
+  const all = [];
+  for(const a of fx.items){ const f = fx.faces[a.id]; if(f && f.faces) f.faces.forEach((x,i)=>all.push({ key:`${a.id}#${i}`, aid:a.id, d:x.d, c:x.c })); }
+  const byKey = Object.fromEntries(all.map(f=>[f.key, f]));
+  const cent = fs=>{ const m = new Array(128).fill(0); for(const f of fs) for(let i=0;i<128;i++) m[i] += f.d[i]/fs.length; return m; };
+  const cl = [], used = new Set();
+  for(const p of fx.persons){
+    const fs = p.faces.map(k=>byKey[k]).filter(Boolean); if(!fs.length) continue;
+    fs.forEach(f=>used.add(f.key)); cl.push({ pid:p.id, name:p.name, faces:fs, m:cent(fs) });
+  }
+  for(const f of all){
+    if(used.has(f.key)) continue;
+    let best = null, bd = FACE_TH;
+    for(const c of cl){ const d = fdist(f.d, c.m); if(d < bd){ bd = d; best = c; } }
+    if(best){ best.faces.push(f); if(!best.pid) best.m = cent(best.faces); }
+    else cl.push({ faces:[f], m:f.d.slice() });
+  }
+  cl.forEach(c=>{ c.aids = new Set(c.faces.map(f=>f.aid)); c.id = c.pid || c.faces[0].key; });
+  cl.sort((a,b)=>(b.pid?1:0) - (a.pid?1:0) || b.aids.size - a.aids.size);
+  return cl;
+}
+async function openPeople(){
+  if(!fx || fx.gid !== gid) fx = { gid, items:[], faces:{}, persons:[], sel:new Set(), cl:[], running:false, done:0, todo:0, err:"" };
+  openSheet(`<h2>👤 人で探す</h2>
+    <p class="hint" style="margin-top:4px">顔の解析はこのスマホの中だけで行います。顔のデータや名前はサーバーに送りません。</p>
+    <div id="pxProg"></div>
+    <div id="pxSaved"></div>
+    <div class="al-h">写っている人 <span class="hint" style="margin:0">タップで選ぶ(2人以上で「両方写っている写真」)</span></div>
+    <div id="pxPeople" class="pxpeople"><p class="hint" style="grid-column:1/-1">読み込み中…</p></div>
+    <div id="pxAct" class="row" style="margin-top:10px;flex-wrap:wrap"></div>
+    <div id="pxRes"></div>
+    <div class="row"><button class="btn s" id="pxClose">閉じる</button></div>`);
+  $("#pxClose").onclick = closeSheet;
+  try{
+    const [snap, persons, all] = await Promise.all([
+      getDocs(collection(db,"groups",gid,"album")),
+      fdb.get("p:"+gid),
+      fdb.all(`f:${gid}:`)
+    ]);
+    fx.items = snap.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>b.at - a.at);
+    fx.persons = persons || [];
+    const pre = `f:${gid}:`; for(const k in all) fx.faces[k.slice(pre.length)] = all[k];
+  }catch(e){ const el = $("#pxPeople"); if(el) el.innerHTML = `<p class="hint" style="grid-column:1/-1">読み込めませんでした(${esc(errMsg(e))})</p>`; return; }
+  loadPeopleAlbums(); renderPeople(); runFaceScan();
+}
+function pxProg(msg){
+  const el = $("#pxProg"); if(!el || !fx) return;
+  if(msg){ el.innerHTML = `<div class="hint">${esc(msg)}</div>`; return; }
+  if(fx.err){ el.innerHTML = `<div class="hint">⚠️ ${esc(fx.err)} <a href="#" id="pxRetry">もう一度</a></div>`; $("#pxRetry").onclick = e=>{ e.preventDefault(); fx.err = ""; runFaceScan(); }; return; }
+  if(fx.running){ const pct = fx.todo ? Math.round(fx.done/fx.todo*100) : 0;
+    el.innerHTML = `<div class="hint">写真を解析中… ${fx.done}/${fx.todo}枚(閉じても続きます)</div><div class="pxbar"><i style="width:${pct}%"></i></div>`; return; }
+  el.innerHTML = `<div class="hint">アルバムの写真 ${fx.items.length}枚を解析ずみ</div>`;
+}
+async function runFaceScan(){
+  if(!fx || fx.running) return;
+  const g = fx.gid, todo = fx.items.filter(a=>!fx.faces[a.id]);
+  if(!todo.length){ pxProg(); return; }
+  fx.running = true; fx.todo = todo.length; fx.done = 0; fx.err = "";
+  pxProg("顔認識の準備中…(初回だけ10MBほど読み込みます)");
+  let fa;
+  try{ fa = await loadFaceApi(); }
+  catch(e){ fx.running = false; fx.err = "顔認識を読み込めませんでした。通信状況を確かめてください"; pxProg(); return; }
+  const opt = new fa.SsdMobilenetv1Options({ minConfidence: 0.5 });
+  for(const a of todo){
+    if(!fx || fx.gid !== g || gid !== g) break;
+    try{
+      const p = await getDoc(doc(db,"groups",g,"albimg",a.id));
+      const src = p.exists() ? p.data().data : a.thumb;
+      const img = await new Promise((res,rej)=>{ const i = new Image(); i.onload = ()=>res(i); i.onerror = rej; i.src = src; });
+      const det = await fa.detectAllFaces(img, opt).withFaceLandmarks().withFaceDescriptors();
+      const v = { at: Date.now(), faces: det.slice(0, 12).map(r=>({ d: Array.from(r.descriptor, x=>Math.round(x*1e4)/1e4), c: faceCrop(img, r.detection.box) })) };
+      fx.faces[a.id] = v; await fdb.set(`f:${g}:${a.id}`, v);
+    }catch(_){ /* 読めなかった写真は次回もう一度 */ }
+    fx.done++; pxProg();
+    if(fx.done % 6 === 0) renderPeople();
+    await new Promise(r=>setTimeout(r, 0));
+  }
+  if(fx) { fx.running = false; pxProg(); renderPeople(); }
+}
+function renderPeople(){
+  const box = $("#pxPeople"); if(!box || !fx) return;
+  fx.cl = faceClusters();
+  const ids = new Set(fx.cl.map(c=>c.id)); for(const s of [...fx.sel]) if(!ids.has(s)) fx.sel.delete(s);
+  const isMain = c=>c.pid || c.aids.size >= 2;
+  const main = fx.cl.filter(isMain), rest = fx.cl.filter(c=>!isMain(c));
+  const card = c=>`<button class="pxp${fx.sel.has(c.id)?" on":""}" data-id="${esc(c.id)}"><img src="${esc(c.faces[0].c)}" alt=""><b>${esc(c.name || "名前なし")}</b><span>${c.aids.size}枚</span></button>`;
+  box.innerHTML = fx.cl.length
+    ? main.map(card).join("") + (rest.length ? (fx.showRest ? rest.map(card).join("") : `<button class="pxp more" id="pxMore"><span style="font-size:22px;opacity:1">＋</span><b>1枚だけの人</b><span>${rest.length}人</span></button>`) : "")
+    : `<p class="hint" style="grid-column:1/-1">${fx.running ? "見つかった顔がここに並びます…" : (fx.items.length ? "顔が見つかりませんでした" : "アルバムにまだ写真がありません")}</p>`;
+  box.querySelectorAll(".pxp[data-id]").forEach(b=>b.onclick = ()=>{ const id = b.dataset.id; fx.sel.has(id) ? fx.sel.delete(id) : fx.sel.add(id); renderPeople(); });
+  const more = $("#pxMore"); if(more) more.onclick = ()=>{ fx.showRest = true; renderPeople(); };
+  renderPeopleAct(); renderPeopleRes();
+}
+function renderPeopleAct(){
+  const el = $("#pxAct"); if(!el) return;
+  const sel = fx.cl.filter(c=>fx.sel.has(c.id));
+  if(!sel.length){ el.innerHTML = ""; return; }
+  const one = sel.length === 1;
+  el.innerHTML = `<button class="btn s" id="pxName">✏️ ${one ? (sel[0].pid ? "名前を変える" : "名前を付ける") : "同じ人としてまとめる"}</button>`
+    + (one && sel[0].pid ? `<button class="btn s" id="pxForget">名前を外す</button>` : "")
+    + `<button class="btn s" id="pxClear">選択を解除</button>`;
+  $("#pxClear").onclick = ()=>{ fx.sel.clear(); renderPeople(); };
+  $("#pxName").onclick = async ()=>{
+    const named = sel.find(c=>c.pid);
+    const name = prompt(one ? "この人の名前" : "まとめた人の名前", named ? named.name : ""); if(name === null) return;
+    const nm = name.trim().slice(0, 20); if(!nm) return;
+    const keepId = named ? named.pid : "p" + Date.now().toString(36);
+    const drop = new Set(sel.filter(c=>c.pid).map(c=>c.pid));
+    const keys = [...new Set(sel.flatMap(c=>c.faces.map(f=>f.key)))];
+    fx.persons = fx.persons.filter(p=>!drop.has(p.id));
+    fx.persons.push({ id:keepId, name:nm, faces:keys });
+    try{ await fdb.set("p:"+gid, fx.persons); }catch(_){}
+    fx.sel = new Set([keepId]); renderPeople(); toast(`「${nm}」にしました`);
+  };
+  const fg = $("#pxForget"); if(fg) fg.onclick = async ()=>{
+    fx.persons = fx.persons.filter(p=>p.id !== sel[0].pid);
+    try{ await fdb.set("p:"+gid, fx.persons); }catch(_){}
+    fx.sel.clear(); renderPeople();
+  };
+}
+function renderPeopleRes(){
+  const el = $("#pxRes"); if(!el) return;
+  const sel = fx.cl.filter(c=>fx.sel.has(c.id));
+  if(!sel.length){ el.innerHTML = ""; return; }
+  const list = fx.items.filter(a=>sel.every(c=>c.aids.has(a.id)));
+  const title = sel.map(c=>c.name || "この人").join("と");
+  el.innerHTML = `<div class="al-h">${esc(title)}が写っている写真 <span class="hint" style="margin:0">(${list.length}枚)</span></div>
+    <div class="al-grid">${list.map((a,i)=>`<img class="al-th" data-i="${i}" src="${esc(a.thumb)}" alt="">`).join("") || `<p class="hint" style="grid-column:1/-1">${sel.length > 1 ? "全員が写っている写真はありません" : "写真がありません"}</p>`}</div>
+    ${list.length ? `<button class="btn p" id="pxSave" style="width:100%;margin-top:10px">📚 アルバムとして保存</button>` : ""}`;
+  el.querySelectorAll(".al-th").forEach(im=>im.onclick = ()=>openViewer(list, +im.dataset.i, null));
+  const sv = $("#pxSave"); if(sv) sv.onclick = async ()=>{
+    const name = prompt("アルバムの名前", `${title}との写真`); if(name === null) return;
+    const nm = name.trim().slice(0, 30) || `${title}との写真`;
+    sv.disabled = true;
+    try{
+      await addDoc(collection(db,"groups",gid,"palbums"), { uid: me.uid, at: Date.now(), name: nm, ids: list.slice(0, 500).map(a=>a.id) });
+      toast(`📚「${nm}」を保存しました`); loadPeopleAlbums();
+    }catch(e){ toast(errMsg(e)); }
+    sv.disabled = false;
+  };
+}
+// 保存した「人のアルバム」(グループで共有。中身は写真IDのリストだけ)
+async function loadPeopleAlbums(){
+  const el = $("#pxSaved"); if(!el) return;
+  let list = [];
+  try{ const s = await getDocs(collection(db,"groups",gid,"palbums")); list = s.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>b.at - a.at); }catch(_){ return; }
+  if(!$("#pxSaved")) return;
+  el.innerHTML = list.length ? `<div class="al-h">📚 人のアルバム</div><div class="pxsaved">${list.map((p,i)=>`<button class="pxchip" data-i="${i}">${esc(p.name)} <span style="opacity:.55">${(p.ids||[]).length}</span></button>`).join("")}</div>` : "";
+  el.querySelectorAll("[data-i]").forEach(b=>b.onclick = ()=>openPeopleAlbum(list[+b.dataset.i]));
+}
+function openPeopleAlbum(pa){
+  const byId = Object.fromEntries((fx ? fx.items : []).map(a=>[a.id, a]));
+  const list = (pa.ids || []).map(id=>byId[id]).filter(Boolean);
+  const mine = me && pa.uid === me.uid;
+  openSheet(`<h2>📚 ${esc(pa.name)}</h2>
+    <div class="meta">${avatarHTML(members[pa.uid],18)} ${esc(who(pa.uid))} が作成 ・ ${list.length}枚</div>
+    <div class="al-grid">${list.map((a,i)=>`<img class="al-th" data-i="${i}" src="${esc(a.thumb)}" alt="">`).join("") || `<p class="hint" style="grid-column:1/-1">写真が見つかりません(削除された可能性があります)</p>`}</div>
+    <div class="row">${mine ? `<button class="btn d" id="paDel">🗑️ 削除</button>` : ""}<button class="btn s" id="paBack">戻る</button></div>`);
+  $("#sheet").querySelectorAll(".al-th").forEach(im=>im.onclick = ()=>openViewer(list, +im.dataset.i, null));
+  $("#paBack").onclick = openPeople;
+  const del = $("#paDel"); if(del) del.onclick = async ()=>{
+    if(!confirm(`「${pa.name}」を削除しますか？(写真そのものは消えません)`)) return;
+    try{ await deleteDoc(doc(db,"groups",gid,"palbums",pa.id)); toast("削除しました"); openPeople(); }catch(e){ toast(errMsg(e)); }
+  };
+}
 
 // ---------- 記録フォーム ----------
 function openForm(s, pos, st){
