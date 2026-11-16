@@ -1859,7 +1859,7 @@ const VAPID_KEY = "BCZeVGl2Of9j-s7AkV-pTzlNxI5jdZMpRIvBJHzrftqg6IrsaaVH2EJDgGR8z
 const SLOTS = 5, ART_HOUR = 21;
 const jstDate = (t=Date.now()) => new Date(t + 9*3600*1000).toISOString().slice(0,10);
 const jstHour = (t=Date.now()) => new Date(t + 9*3600*1000).getUTCHours();
-let daily = null, dailyDate = null, unsubDaily = null, reals = {}, realMarkers = [];
+let daily = null, dailyDate = null, unsubDaily = null, reals = {}, realMarkers = [], realFocus = null;
 const myRealId = n => jstDate() + "_" + n + "_" + (me ? me.uid : "");
 // 今の回(通知が届いた最新の回)。まだなら0
 function curSlot(){
@@ -1888,8 +1888,10 @@ const slotLabel = r => r.slot ? `👣 ${r.slot}回目` : "";
 function drawReals(){
   realMarkers.forEach(m=>m.remove()); realMarkers=[];
   if(!me || (filter!=="all" && filter!=="real")) return;
+  const today = jstDate();
   for(const r of Object.values(reals)){
     if(typeof r.lat!=="number" || typeof r.lng!=="number") continue;
+    if(r.date!==today && r.id!==realFocus) continue;   // 地図には今日の分だけ(過去の分は「自分の写真」に残る)
     const el = document.createElement("div");
     el.innerHTML = `<div class="rpin"><div class="rpic${realHidden(r)?" blur":""}">${r.thumb?`<img src="${esc(r.thumb)}" alt="">`:""}</div><div class="rbadge">👣</div>${members[r.uid]?`<div class="mk-who">${avatarHTML(members[r.uid],22)}</div>`:""}<div class="plabel"><b>${esc(who(r.uid))}</b><span>${mdText(r.date)} ${hhmm(r.at)}</span></div></div>`;
     el.addEventListener("click", e=>{ e.stopPropagation(); openReal(r.id); });
@@ -2049,7 +2051,7 @@ async function openReal(id, fromHist){
     <a class="gm" href="#" id="rMap">📍 撮った場所を地図で見る</a>
     <div class="row">${mine?`<button class="btn d" id="rDel">🗑️ 削除</button>`:""}<button class="btn s" id="rClose2">${fromHist?"‹ 一覧へ戻る":"閉じる"}</button></div>`);
   $("#rClose2").onclick = closeSheet;
-  $("#rMap").onclick = e=>{ e.preventDefault(); closeSheet(); closeRealHistory(); closeArt(); if(filter!=="all" && filter!=="real"){ filter="all"; renderAll(); } setView([r.lat, r.lng], Math.max(map.getZoom(),16)); };
+  $("#rMap").onclick = e=>{ e.preventDefault(); closeSheet(); closeRealHistory(); closeArt(); realFocus = r.id; if(filter!=="all" && filter!=="real"){ filter="all"; renderAll(); } else drawReals(); setView([r.lat, r.lng], Math.max(map.getZoom(),16)); };
   if(mine) $("#rDel").onclick = ()=>{
     openSheet(`<h2>この投稿を削除しますか？</h2><p class="hint">参加しているすべてのグループから消えます。元に戻せません。</p>
       <div class="row"><button class="btn s" id="rdNo">やめる</button><button class="btn d" id="rdYes">削除する</button></div>`);
